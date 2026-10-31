@@ -1918,6 +1918,7 @@ function addLabel(obj, offY, kind, data, onClick) {
   const L = { el, obj, offY, kind, data, mode: null }; labels.push(L); return L;
 }
 function labelMode(L) {
+  if (L.kind === "npc") return (L.data.type === "host" ? focus.g === 0 : focus.g === L.data.g) ? "fixed" : "hide";
   if (L.kind !== "bld") return "fixed";
   if (focus.g === 0 || (focus.g && focus.g !== L.data.g)) return isOpen(L.data.g, L.data.key) ? "dot" : "hide";
   if (focus.g === L.data.g || camera.position.distanceTo(controls.target) < 70) return "full";
@@ -1936,6 +1937,12 @@ function renderLabel(L, mode) {
     const g = GRADES[d.g - 1], cnt = SUBJECTS.filter(s => isOpen(g.n, s.key)).length;
     L.el.style.setProperty("--g", g.color);
     L.el.innerHTML = '<i></i><span>' + g.name + '</span>' + (cnt ? "<small>" + cnt + "</small>" : "");
+  } else if (L.kind === "npc") {
+    const host = d.type === "host", s = host ? null : subjectOf(d.key);
+    L.el.className = "lbl npc" + (host ? " host" : "") + (mode === "hide" ? " hide" : "");
+    if (s) L.el.style.setProperty("--s", s.color);
+    L.el.setAttribute("aria-label", host ? "島主" + d.name + "，點我問問題" : d.name + "，" + GRADES[d.g - 1].name + s.name + "助教");
+    L.el.innerHTML = host ? '<i>主</i><span>島主．' + esc(d.name) + '</span>' : '<i>' + esc(s.name[0]) + '</i><span>' + esc(d.name) + '</span>';
   } else if (L.kind === "lock") {
     L.el.innerHTML = '<span class="lk">' + ICON_LOCK + '</span>' + d.name + '<small>尚未開放</small>';
   } else L.el.innerHTML = d.name;
@@ -1945,7 +1952,7 @@ function updateLabels() {
   const W = innerWidth, H = innerHeight;
   labels.forEach(L => {
     const m = labelMode(L); if (m !== L.mode) renderLabel(L, m);
-    let show = (ui.names || L.kind === "bld") && L.mode !== "hide";
+    let show = (ui.names || L.kind === "bld" || L.kind === "npc") && L.mode !== "hide";
     if (L.kind === "grade" && L.data.g && focus.g === L.data.g && focus.key) show = false;
     if (!show) { L.el.style.visibility = "hidden"; return; }
     L.obj.getWorldPosition(_v); _v.y += L.offY; _v.project(camera);
@@ -1978,13 +1985,14 @@ function pickAt(cx, cy) {
   ray.setFromCamera(ptr, camera);
   const hits = ray.intersectObjects(pickables, false);
   if (!hits.length) return null;
-  const pri = ["bird", "mascot", "building"];
+  const pri = ["npc", "host", "bird", "mascot", "building"];
   for (const t of pri) { const h = hits.find(x => x.object.userData.type === t); if (h) return h.object.userData; }
   return hits[0].object.userData;
 }
 function onPick(u) {
   if (!u) return;
   stopTour();
+  if (u.type === "npc" || u.type === "host") return openNPC(u);
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2026,7 +2034,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2085,6 +2093,7 @@ function initWorld() {
     clouds.forEach(c => { c.obj.visible = ui.fx; });
     if (!ui.paused) stepAmbient(dt, time);
     stepParticles(dt, time);
+    stepNPC(dt, time); stepLamp(dt);
     renderer.render(scene, camera);
     updateLabels();
   });
@@ -2193,7 +2202,27 @@ function openLesson(n, key, bn, id) {
     stopSpeak();
     $all(".tab").forEach(x => x.setAttribute("aria-selected", x.getAttribute("data-tab") === tab ? "true" : "false"));
     FN[tab](panel, L, pk, key);
+    if (tab !== "quiz") lessonNav(tab);
     try { sessionStorage.setItem("jialan:tab:" + pk, tab); } catch (e) {}
+  }
+  function lessonNav(tab) {
+    // 每個分頁最下方：下一步、前往挑戰關卡；課文分頁另有「本課已讀」
+    const i = TABS.findIndex(t => t[0] === tab), nx = TABS[i + 1], hasQuiz = TABS.some(t => t[0] === "quiz");
+    const read = !!(store("read") || {})[pk], nav = document.createElement("div"); nav.className = "lesson-next";
+    nav.innerHTML = (tab === "text" ? '<button class="btn read-btn' + (read ? " done" : " ghost") + '" data-read>' + (read ? "✓ 本課已讀" : "我讀完了 ✓") + '</button>' : "") +
+      (nx && nx[0] !== "quiz" ? '<button class="btn ghost" data-next="' + nx[0] + '">下一步：' + esc(nx[1]) + ' →</button>' : "") +
+      (hasQuiz ? '<button class="btn quiz-go" data-next="quiz">🏁 前往挑戰關卡 →</button>' : "");
+    panel.appendChild(nav);
+    $all("[data-next]", nav).forEach(b => b.addEventListener("click", () => {
+      const t = b.getAttribute("data-next"); show(t); speak(TABS.find(x => x[0] === t)[1]);
+      const tb = $(".tabs"); if (tb && tb.scrollIntoView) tb.scrollIntoView({ block: "start", behavior: "smooth" });
+    }));
+    const rb = $("[data-read]", nav);
+    if (rb) rb.addEventListener("click", () => {
+      const r = store("read") || {}; r[pk] = r[pk] ? 0 : 1; if (!r[pk]) delete r[pk]; store("read", r);
+      rb.classList.toggle("done", !!r[pk]); rb.classList.toggle("ghost", !r[pk]); rb.textContent = r[pk] ? "✓ 本課已讀" : "我讀完了 ✓";
+      if (r[pk]) { playChime(); speak("太棒了，課文讀完了！" + (hasQuiz ? "要不要去挑戰關卡？" : "")); }
+    });
   }
   $all(".tab").forEach(x => x.addEventListener("click", () => { show(x.getAttribute("data-tab")); speak(x.textContent); }));
   let last = null; try { last = sessionStorage.getItem("jialan:tab:" + pk); } catch (e) {}
@@ -2716,6 +2745,183 @@ function confetti(ms = 3600) {
   requestAnimationFrame(step);
 }
 
+/* ===================== 助教與島主 NPC ===================== */
+const npcs = [];
+const HOST_NAME = "嘉嘉";             // 島主名字：想換名字改這裡
+const SUBJECT_TIPS = {
+  chinese: "讀課文時大聲唸出來，遇到不會的字先圈起來，再到「生字」分頁查一查、聽一聽。",
+  math: "先把題目讀兩次，圈出數字和單位，再想想要用加、減、乘、除哪一種方法。",
+  english: "每天開口說一點點，跟著喇叭唸三次，比默默背單字更容易記住。",
+  science: "先猜猜看會發生什麼事，再動手觀察，把看到的變化記下來。",
+  social: "把學到的地方、人物和事件，跟我們嘉蘭村的生活連起來想一想。",
+  music: "先拍出節奏，再跟著哼旋律，最後才唱出歌詞，就會越唱越順。",
+  integrative: "想一想自己的感受，也聽聽同學的想法，大家一起找出好辦法。",
+  indigenous: "回家跟家裡的長輩說說今天學的族語，用得越多，記得越牢。",
+  art: "先仔細觀察顏色和形狀，再大膽畫下第一筆，作品沒有標準答案。",
+  tech: "動手前先想好步驟，一步一步來；遇到問題，先檢查是哪一步出錯。"
+};
+const tutorName = (n, key) => "嘉" + GRADES[n - 1].name[0] + subjectOf(key).name[0];
+function npcFigure(i, color, s) {
+  const g = person(i), shirt = M(color);
+  g.children[0].material = shirt; g.userData.arms.forEach(a => { a.children[0].material = shirt; });
+  g.scale.setScalar(s); return g;
+}
+function tutorModel(n, key, i) {
+  const s = subjectOf(key), g = npcFigure(i, soft(s.color), 1.75);
+  // 帽子（科目色）＋胸前白色名牌
+  g.add(part(cyl(0.135, 0.135, 0.07, 14), M(s.color), 0, 0.99, 0));
+  g.add(part(cyl(0.1, 0.12, 0.08, 14), M(s.color), 0, 1.04, 0));
+  g.add(part(box(0.2, 0.025, 0.11), M(s.color), 0, 0.97, 0.1));
+  g.add(part(box(0.1, 0.07, 0.02), M("#FFFFFF"), 0.05, 0.64, 0.115));
+  // 手上的書
+  const book = part(box(0.13, 0.17, 0.04), M("#F4EBD8"), 0, -0.2, 0.05); book.add(part(box(0.135, 0.175, 0.012), M(s.color), 0, 0, -0.024)); g.userData.arms[0].add(book);
+  return g;
+}
+function hostModel() {
+  // 島主：黑底紅邊的排灣族背心、彩色頭飾（百合花）
+  const g = npcFigure(5, "#F4EFE3", 2.1);
+  const vest = new THREE.CapsuleGeometry(0.127, 0.2, 4, 12); g.add(part(vest, M("#232323"), 0, 0.575, 0));
+  [0.69, 0.47].forEach(y => g.add(part(cyl(0.132, 0.132, 0.035, 14), M("#B5322A"), 0, y, 0)));
+  g.add(part(cyl(0.13, 0.13, 0.025, 14), M("#E8B33A"), 0, 0.58, 0));
+  const band = part(new THREE.TorusGeometry(0.118, 0.026, 6, 18), M("#B5322A"), 0, 0.95, 0); band.rotation.x = Math.PI / 2; g.add(band);
+  const band2 = part(new THREE.TorusGeometry(0.12, 0.012, 5, 18), M("#E8B33A"), 0, 0.97, 0); band2.rotation.x = Math.PI / 2; g.add(band2);
+  const lily = new THREE.Group(); lily.position.set(0.06, 1.06, 0.06);
+  for (let k = 0; k < 5; k++) { const p = part(cone(0.025, 0.11, 5), M("#FFFFFF"), 0, 0.03, 0); p.rotation.z = 0.5; p.rotation.y = k / 5 * Math.PI * 2; lily.add(p); }
+  lily.add(part(cyl(0.006, 0.006, 0.12, 4), M("#4E8A3E"), 0, -0.04, 0)); g.add(lily);
+  g.add(part(cyl(0.012, 0.012, 1.0, 5), M("#7A5A3A"), 0.24, 0.5, 0.05));   // 手杖
+  g.add(part(sph(0.035, 8, 6), M("#E8B33A"), 0.24, 1.02, 0.05));
+  return g;
+}
+function addNPC(model, pos, data, labelOff) {
+  model.position.copy(pos); scene.add(model);
+  const hit = new THREE.Mesh(box(0.6, 1.25, 0.6), new THREE.MeshBasicMaterial({ visible: false }));
+  hit.position.y = 0.6; hit.userData = Object.assign({ pick: true }, data); model.add(hit); pickables.push(hit);
+  const o = { obj: model, data, wave: 0, yaw: model.rotation.y }; npcs.push(o);
+  o.label = addLabel(model, labelOff, "npc", data, () => openNPC(data));
+  return o;
+}
+function makeNPCs() {
+  let i = 0;
+  GRADES.forEach(gr => {
+    const isl = islands[gr.n], camDir = new V3(0, 0, 1).lerp(isl.pos.clone().setY(0).normalize(), 0.3).normalize();
+    SUBJECTS.forEach(s => {
+      // 站在小島靠近鏡頭的那一側，名字才不會和學習館的標籤疊在一起
+      const b = isl.bld[s.key], side = new V3(camDir.z, 0, -camDir.x);
+      const p = isl.pos.clone().add(b.local).addScaledVector(camDir, 1.6).addScaledVector(side, 0.55); p.y = 0.03;
+      const m = tutorModel(gr.n, s.key, i++); m.rotation.y = b.th + Math.PI;
+      addNPC(m, p, { type: "npc", g: gr.n, key: s.key, name: tutorName(gr.n, s.key) }, 2.0);
+    });
+  });
+  const h = hostModel(); h.rotation.y = 0.3;
+  addNPC(h, new V3(-4.4, 0.06, 8.0), { type: "host", name: HOST_NAME }, 2.7);
+}
+const _np = new V3();
+function stepNPC(dt, time) {
+  npcs.forEach(o => {
+    const g = o.obj;
+    const vis = o.data.type === "host" ? (focus.g === 0 || focus.g === null) : focus.g === o.data.g;
+    if (!vis && !o.wave) return;
+    // 慢慢轉向鏡頭
+    const want = Math.atan2(camera.position.x - g.position.x, camera.position.z - g.position.z);
+    let d = want - g.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); g.rotation.y += d * Math.min(1, dt * 2.5);
+    const arm = g.userData.arms[1];
+    if (o.wave > 0) { o.wave = Math.max(0, o.wave - dt); arm.rotation.z = 2.4 + Math.sin(time * 12) * 0.35; }
+    else { arm.rotation.z = 0; arm.rotation.x = Math.sin(time * 1.6 + g.userData.ph) * 0.12; }
+    g.position.y = 0.03 + Math.abs(Math.sin(time * 2 + g.userData.ph)) * 0.02;
+  });
+}
+function npcWave(data) { const o = npcs.find(n => n.data.type === data.type && n.data.g === data.g && n.data.key === data.key); if (o) o.wave = 2.2; }
+function openNPC(d) {
+  stopTour(); npcWave(d);
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  if (d.type === "host") return openHost();
+  const g = GRADES[d.g - 1], s = subjectOf(d.key), open = isOpen(d.g, d.key), name = d.name;
+  const prefix = "g" + d.g + "-" + d.key + "-", prog = store("progress") || {}, certs = store("certs") || {};
+  const starN = Object.keys(prog).filter(k => k.indexOf(prefix) === 0).reduce((a, k) => a + prog[k], 0), certN = Object.keys(certs).filter(k => k.indexOf(prefix) === 0).length;
+  const hello = open
+    ? "嗨！我是" + name + "，" + g.name + s.name + "館的助教。這一館已經開放了，裡面有課文、練習和挑戰關卡，答對 7 成就能領取學習證書喔！"
+    : "嗨！我是" + name + "，負責" + g.name + s.name + "館。這裡還在建造中，老師們正在準備學習內容，請再等等我喔！";
+  openModal('<div class="npc-card" style="--s:' + s.color + '"><button class="m-close" aria-label="關閉">×</button>' +
+    '<div class="npc-head"><div class="npc-ava">' + esc(s.name[0]) + '</div><div><small>' + esc(g.name + "．" + s.name + "館助教") + '</small><h2>' + esc(name) + '</h2>' +
+    '<p class="npc-why">「嘉」是嘉蘭國小，「' + g.name[0] + '」是' + g.name + '，「' + s.name[0] + '」是' + s.name + '</p></div></div>' +
+    '<div class="npc-bubble">' + esc(hello) + '</div>' +
+    '<h3>📚 ' + esc(s.name) + '學習小撇步</h3><p class="npc-tip">' + esc(SUBJECT_TIPS[d.key] || s.desc) + '</p>' +
+    (open ? '<p class="npc-prog">你在這一館：⭐ ' + starN + ' 顆星．🎓 ' + certN + ' 張證書</p>' : "") +
+    '<div class="row npc-act">' + (open ? '<button class="btn" data-go="g' + d.g + '-' + d.key + '">進入' + esc(s.name) + '館 →</button>' : '<button class="btn ghost" data-go="g' + d.g + '-' + d.key + '">看看' + esc(s.name) + '館</button>') +
+    '<button class="say" id="npcSay">' + ICON_SPEAK + '聽一聽</button></div></div>', "npc-sheet");
+  $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
+  $("#npcSay").addEventListener("click", () => speak(hello + "學習小撇步：" + (SUBJECT_TIPS[d.key] || ""), { force: true }));
+  speak(hello);
+}
+const HOST_FAQ = [
+  { q: "怎麼開始學習？", k: ["開始", "怎麼學", "學習", "進入", "上課", "課文"], a: "點畫面上方的「一年級」到「六年級」，或直接點海上的年級島，再點有顏色的學習館就能開始。灰色、寫著「建造中」的館，老師還在準備喔！", act: ["去六年級國語館", "g6-chinese"] },
+  { q: "怎麼拿證書？", k: ["證書", "獎狀", "獎", "拿"], a: "每一課最後有「挑戰關卡」，答對 7 成以上（2 顆星）就能領取學習證書。左下角的 🎓 可以看你拿到的所有證書，也能再下載一次。", act: ["看我的證書", "certs"] },
+  { q: "晚上太暗看不清楚？", k: ["暗", "黑", "晚上", "頭燈", "看不到", "看不清", "燈", "夜"], a: "點下方工具列的 🔦 頭燈，就能照亮你看的地方；也可以按 ☀ 按鈕切換成白天。", act: ["幫我開頭燈", "lamp"] },
+  { q: "卡片擋住畫面？", k: ["卡片", "擋", "收合", "收起", "遮"], a: "點右邊卡片旁的「›」小把手，卡片就會收起來；想看的時候再點一次就打開。" },
+  { q: "怎麼換音樂或關掉？", k: ["音樂", "歌", "吵", "音量", "聲音"], a: "點工具列的 ♪ 音樂按鈕，可以換歌、調音量，也可以關掉背景音樂。" },
+  { q: "我的進度存在哪？", k: ["進度", "紀錄", "存", "不見", "消失", "換電腦"], a: "你的星星、證書和找到的藍鵲，都存在這台裝置的瀏覽器裡。換一台電腦或清除瀏覽資料就會不見，記得把證書下載下來保存。" },
+  { q: "助教是誰？", k: ["助教", "npc", "老師", "嘉六國", "名字"], a: "每座學習館旁邊都站著一位助教，名字像「嘉六國」：「嘉」是嘉蘭國小，「六」是六年級，「國」是國語。點他們，就會告訴你這一館的學習方法。" },
+  { q: "地圖怎麼移動？", k: ["移動", "轉", "放大", "縮小", "地圖", "迷路", "拖"], a: "一根手指拖曳可以轉動畫面，兩根手指捏合可以放大縮小；電腦上用滑鼠拖曳、滾輪縮放。迷路了就按 🏠 回到全景。" },
+  { q: "台灣藍鵲在哪裡？", k: ["藍鵲", "鳥", "找"], a: "島上藏著十隻台灣藍鵲，仔細看看屋頂、樹上和海邊，點到牠就算找到了！左下角會記錄你找到幾隻。" },
+  { q: "大武山和太平洋？", k: ["大武山", "太平洋", "山", "海", "船", "火車", "飛魚"], a: "大武山和太平洋還沒開放探險，以後會有新的冒險！現在可以先欣賞海上的拼板舟、飛魚，還有山腳下經過的南迴線火車。" }
+];
+function hostAnswer(text) {
+  const t = text.toLowerCase(); let best = null, sc = 0;
+  HOST_FAQ.forEach(f => { const n = f.k.filter(k => t.indexOf(k) >= 0).length; if (n > sc) { sc = n; best = f; } });
+  return best;
+}
+function openHost() {
+  const hello = "嗨！我是島主" + HOST_NAME + "，歡迎來到嘉蘭樂學島！不知道怎麼玩、怎麼拿證書，都可以問我。";
+  openModal('<div class="npc-card host"><button class="m-close" aria-label="關閉">×</button>' +
+    '<div class="npc-head"><div class="npc-ava host">主</div><div><small>ISLAND HOST．島主</small><h2>問問島主' + esc(HOST_NAME) + '</h2><p class="npc-why">熟悉整座群島，陪你找到下一步。</p></div></div>' +
+    '<div class="chat" id="chatLog" aria-live="polite"><div class="msg host"><b>島主' + esc(HOST_NAME) + '</b>' + esc(hello) + '</div></div>' +
+    '<div class="chips host-chips">' + HOST_FAQ.map((f, i) => '<button class="pill" data-faq="' + i + '">' + esc(f.q) + '</button>').join("") + '</div>' +
+    '<form class="chat-in" id="chatForm"><input id="chatTxt" autocomplete="off" maxlength="60" placeholder="問問島主：例如「怎麼拿證書？」"><button class="btn" type="submit">送出</button></form>' +
+    '<p class="npc-foot">島主只回答這座學習島的使用方法，不會連到網路上的 AI，也不會告訴你測驗答案喔。</p></div>', "npc-sheet");
+  const log = $("#chatLog");
+  const add = (who, html) => { const m = document.createElement("div"); m.className = "msg " + who; m.innerHTML = html; log.appendChild(m); log.scrollTop = log.scrollHeight; return m; };
+  const reply = (f, asked) => {
+    add("me", esc(asked));
+    if (!f) { const a = "這個問題我還不太會回答，試試看下面的問題，或是問問老師喔！"; add("host", "<b>島主" + esc(HOST_NAME) + "</b>" + esc(a)); speak(a); return; }
+    const m = add("host", "<b>島主" + esc(HOST_NAME) + "</b>" + esc(f.a) + (f.act ? '<br><button class="btn ghost sm" data-act="' + f.act[1] + '">' + esc(f.act[0]) + ' →</button>' : ""));
+    const b = $("[data-act]", m); if (b) b.addEventListener("click", () => { const v = b.getAttribute("data-act"); if (v === "lamp") { setLamp(true); closeModal(); go(modalBack); } else go(v); });
+    speak(f.a);
+  };
+  $all("[data-faq]").forEach(b => b.addEventListener("click", () => { const f = HOST_FAQ[+b.getAttribute("data-faq")]; reply(f, f.q); }));
+  $("#chatForm").addEventListener("submit", e => { e.preventDefault(); const v = $("#chatTxt").value.trim(); if (!v) return; $("#chatTxt").value = ""; reply(hostAnswer(v), v); });
+  speak(hello);
+}
+
+/* ===================== 頭燈：夜裡照亮鏡頭前方 ===================== */
+const lamp = { on: false, spot: null, hinted: false, t: 0 };
+const LAMP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l-2 6H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 9h6v10a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 12.5v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+function setLamp(on, quiet) {
+  lamp.on = !!on;
+  if (lamp.on && !lamp.spot && webgl && camera && scene) {
+    const s = new THREE.SpotLight("#FFF1D2", 0, 0, 0.62, 0.7, 0); s.castShadow = false;
+    camera.add(s); s.position.set(0, 0.3, 0); s.target.position.set(0, 0, -1); camera.add(s.target);
+    if (!camera.parent) scene.add(camera);
+    lamp.spot = s;
+  }
+  try { localStorage.setItem("jialan:lamp", lamp.on ? "1" : "0"); } catch (e) {}
+  const b = $("#lampBtn"); if (b) { b.classList.toggle("on", lamp.on); b.setAttribute("aria-pressed", String(lamp.on)); b.setAttribute("aria-label", "頭燈：" + (lamp.on ? "開" : "關")); }
+  document.body.classList.toggle("lamp-on", lamp.on);
+  if (!quiet) toast(lamp.on ? "🔦 頭燈打開了！" + (S.dark < 0.3 ? "（白天效果不明顯，天黑時最好用）" : "") : "頭燈關掉了");
+}
+function stepLamp(dt) {
+  if (!webgl) return;
+  const k = S.dark;
+  if (lamp.on && !lamp.spot) setLamp(true, true);
+  if (lamp.spot) lamp.spot.intensity = lamp.on ? 1.4 + k * 3.2 : 0;
+  ambient.intensity = (amb.baseAmb != null ? amb.baseAmb : 0.2) + (amb.flash || 0) * 2.2 + (lamp.on ? 0.45 * k : 0);
+  lamp.t += dt;
+  if (!lamp.on && !lamp.hinted && k > 0.6 && lamp.t > 6) {
+    lamp.hinted = true;
+    let seen = false; try { seen = sessionStorage.getItem("jialan:lampHint") === "1"; sessionStorage.setItem("jialan:lampHint", "1"); } catch (e) {}
+    if (!seen) toast("🌙 天黑了！點下方工具列的 🔦 頭燈，就能看清楚島上的路。");
+  }
+}
+
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -3152,6 +3358,7 @@ function start() {
     '</section>' +
     '<div class="hchip place" id="placeChip"></div>' +
     '<button class="hchip guide-btn" id="guideBtn">' + ico("book") + '上島探索指南</button>' +
+    '<button class="hchip host-btn" id="hostBtn" aria-label="問問島主">🙋 問島主</button>' +
     '<p class="tagline">✦　每一座島，都在等你發現</p>' +
     '<div class="hchip stat">' + ico("anchor") + '嘉蘭群島<span class="sep"></span>6 學習島・60 學習館・開放 <b id="statOpen">0</b> 館</div>' +
     '<aside id="panel" class="panel-card" hidden></aside>' +
@@ -3164,6 +3371,7 @@ function start() {
         '<button class="tool wide vbtn" data-view="bird">' + ico("bird") + '<span>鳥瞰</span></button><i class="div"></i>' +
         '<button class="tool" id="zoomOut" aria-label="縮小">' + ico("minus") + '</button><button class="tool" id="zoomIn" aria-label="放大">' + ico("plus") + '</button><i class="div"></i>' +
         '<button class="tool daynight" id="dnBtn" aria-label="切換白天、夜晚、現在">' + ico("sun") + '</button>' +
+        '<button class="tool lamp" id="lampBtn" aria-pressed="false" aria-label="頭燈：關" title="頭燈">' + LAMP_SVG + '</button>' +
         '<button class="tool" id="resetBtn" aria-label="重設視角">' + ico("reset") + '</button>' +
         '<button class="tool wide" id="pauseBtn" aria-pressed="false">' + ico("pause") + '<span>動畫</span></button>' +
         '<button class="tool" id="soundBtn" aria-label="自動朗讀：開">' + ico("sound") + '</button>' +
@@ -3181,6 +3389,9 @@ function start() {
   $("#listBtn").addEventListener("click", () => go("list"));
   $("#certBtn").addEventListener("click", () => go("certs")); updateCertCount();
   $("#guideBtn").addEventListener("click", () => go("guide"));
+  $("#hostBtn").addEventListener("click", () => openNPC({ type: "host", name: HOST_NAME }));
+  $("#lampBtn").addEventListener("click", () => setLamp(!lamp.on));
+  try { if (localStorage.getItem("jialan:lamp") === "1") setLamp(true, true); } catch (e) {}
   $("#panelTab").addEventListener("click", () => setPanelMin(!panelMin()));
   try { if (localStorage.getItem("jialan:panelMin") === "1") setPanelMin(true, false); } catch (e) {}
   $("#clockChip").addEventListener("click", () => go("info"));
