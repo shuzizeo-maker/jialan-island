@@ -2308,7 +2308,7 @@ function tabThink(p, L) {
   $all("[data-ans]", p).forEach(b => b.addEventListener("click", () => { const a = $("#ans" + b.getAttribute("data-ans")); a.hidden = !a.hidden; b.textContent = a.hidden ? "看參考答案" : "收起答案"; if (!a.hidden) speak(a.textContent, { force: true }); }));
 }
 function tabQuiz(p, L, pk) {
-  let qs = L.quiz.slice(), idx = 0, score = 0;
+  let qs = L.quiz.slice(), idx = 0, score = 0, cheered = false;
   const header = () => '<div class="quiz-top"><b>第 ' + (idx + 1) + ' / ' + qs.length + ' 題</b><div class="progress"><i style="width:' + (idx / qs.length * 100) + '%"></i></div><span>答對 ' + score + '</span></div>';
   function next(ok, why) {
     if (ok) score++;
@@ -2366,8 +2366,9 @@ function tabQuiz(p, L, pk) {
       '<h2>' + (stars === 3 ? "太厲害了！" : stars === 2 ? "做得很好！" : "繼續加油！") + '</h2><p>' + qs.length + ' 題答對 ' + score + ' 題</p>' +
       (stars >= CERT_STARS ? '<p class="cert-earn">🎓 恭喜！你可以領取這一課的學習證書。</p>' : '<p class="cert-earn no">答對 7 成以上（2 顆星）就能領取學習證書，再挑戰一次吧！</p>') +
       '<div class="row" style="justify-content:center">' + (stars >= CERT_STARS ? '<button class="btn" id="getCert">🎓 領取證書</button>' : "") + '<button class="btn' + (stars >= CERT_STARS ? " ghost" : "") + '" id="again">再挑戰一次</button><button class="btn ghost m-back">回課程列表</button></div></div>';
-    speak(qs.length + "題答對" + score + "題。" + (stars === 3 ? "太厲害了！" : stars === 2 ? "做得很好！" : "繼續加油！") + (stars >= CERT_STARS ? "可以領取證書了！" : ""));
-    $("#again").addEventListener("click", () => { idx = 0; score = 0; qs = L.quiz.slice(); render(); });
+    const sayIt = () => speak(qs.length + "題答對" + score + "題。" + (stars === 3 ? "太厲害了！" : stars === 2 ? "做得很好！" : "繼續加油！") + (stars >= CERT_STARS ? "可以領取證書了！" : ""));
+    if (stars >= CERT_STARS && !cheered) { cheered = true; stopSpeak(); const ms = playCheer(); confetti(); setTimeout(sayIt, ms); } else if (!cheered) sayIt();
+    $("#again").addEventListener("click", () => { idx = 0; score = 0; cheered = false; qs = L.quiz.slice(); render(); });
     if (stars >= CERT_STARS) { const rec = saveCert(pk, L, score, qs.length, stars); $("#getCert").addEventListener("click", () => certView(p, rec, finish)); }
     $(".m-back", p).addEventListener("click", () => go(modalBack));
   }
@@ -2436,78 +2437,141 @@ function loadCertLogo() {
   certLogo = new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = "assets/logo.png"; });
   return certLogo;
 }
+// 燙金質感：多段金屬漸層＋細微高光
+function goldGrad(x, x0, y0, x1, y1) {
+  const g = x.createLinearGradient(x0, y0, x1, y1);
+  [[0, "#8A6420"], [0.18, "#D9B45A"], [0.32, "#F7E7A6"], [0.46, "#B88A2E"], [0.62, "#E8C870"], [0.78, "#FFF1BE"], [0.9, "#C59A3C"], [1, "#7E5A1C"]].forEach(s => g.addColorStop(s[0], s[1]));
+  return g;
+}
+function goldText(x, txt, cx, y, size, font, spacing) {
+  x.save(); x.font = font; x.textAlign = "center";
+  if (spacing) x.letterSpacing = spacing + "px";
+  const w = x.measureText(txt).width;
+  x.fillStyle = "rgba(90,60,10,.35)"; x.fillText(txt, cx + size * 0.02, y + size * 0.03);          // 壓印陰影
+  x.fillStyle = goldGrad(x, cx - w / 2, y - size, cx + w / 2, y + size * 0.2); x.fillText(txt, cx, y);
+  x.lineWidth = size > 60 ? 1.5 : 0.8; x.strokeStyle = "rgba(110,75,15,.55)"; x.strokeText(txt, cx, y);
+  if (size > 60) { x.globalCompositeOperation = "lighter"; x.globalAlpha = 0.14; x.fillStyle = "#FFF6D5"; x.fillText(txt, cx - 1, y - 1); }
+  x.restore();
+}
+function diamond(x, cx, cy, rw, rh) { x.beginPath(); x.moveTo(cx, cy - rh); x.lineTo(cx + rw, cy); x.lineTo(cx, cy + rh); x.lineTo(cx - rw, cy); x.closePath(); }
 function paiwanBorder(x, w, h, m, t) {
-  // 排灣族紋飾邊框：菱形（百步蛇背紋）與三角鋸齒，紅、黃、黑、綠
-  const RED = "#B5322A", YEL = "#E8B33A", BLK = "#2B2B2B", GRN = "#3E7D4F";
-  x.fillStyle = BLK; x.fillRect(m, m, w - 2 * m, h - 2 * m);
-  x.fillStyle = "#FBF6EA"; x.fillRect(m + t, m + t, w - 2 * (m + t), h - 2 * (m + t));
-  const band = (len, draw) => { const n = Math.round(len / t), step = len / n; for (let i = 0; i < n; i++) draw(i * step, step, i); };
-  const edge = (ox, oy, len, horiz) => band(len, (p, s, i) => {
-    x.save(); x.translate(horiz ? ox + p : ox, horiz ? oy : oy + p); if (!horiz) { x.translate(t, 0); x.rotate(Math.PI / 2); }
-    x.fillStyle = i % 2 ? RED : YEL;
-    x.beginPath(); x.moveTo(s / 2, t * 0.14); x.lineTo(s - s * 0.12, t / 2); x.lineTo(s / 2, t * 0.86); x.lineTo(s * 0.12, t / 2); x.closePath(); x.fill();
-    x.fillStyle = BLK; x.beginPath(); x.moveTo(s / 2, t * 0.36); x.lineTo(s * 0.64, t / 2); x.lineTo(s / 2, t * 0.64); x.lineTo(s * 0.36, t / 2); x.closePath(); x.fill();
-    x.fillStyle = GRN;
-    [[0, 0, 1], [0, t, -1], [s, 0, 1], [s, t, -1]].forEach(([cx, cy, d]) => { x.beginPath(); x.moveTo(cx, cy); x.lineTo(cx + (cx ? -1 : 1) * s * 0.22, cy); x.lineTo(cx, cy + d * t * 0.3); x.closePath(); x.fill(); });
-    x.restore();
+  // 排灣族菱形紋（百步蛇背紋）飾帶：深色底、燙金菱形、紅色眼紋
+  const IN = "#FBF6EA", BG = "#1E2622", RED = "#A8322A";
+  x.fillStyle = BG; x.fillRect(m, m, w - 2 * m, h - 2 * m);
+  x.fillStyle = IN; x.fillRect(m + t, m + t, w - 2 * (m + t), h - 2 * (m + t));
+  const run = (ox, oy, len, horiz) => {
+    const n = Math.round(len / t), s = len / n;
+    for (let i = 0; i < n; i++) {
+      const cx = horiz ? ox + i * s + s / 2 : ox + t / 2, cy = horiz ? oy + t / 2 : oy + i * s + s / 2;
+      x.fillStyle = goldGrad(x, cx - t, cy - t, cx + t, cy + t); diamond(x, cx, cy, (horiz ? s : t) * 0.42, (horiz ? t : s) * 0.36); x.fill();
+      x.fillStyle = BG; diamond(x, cx, cy, (horiz ? s : t) * 0.25, (horiz ? t : s) * 0.2); x.fill();
+      x.fillStyle = RED; diamond(x, cx, cy, (horiz ? s : t) * 0.12, (horiz ? t : s) * 0.1); x.fill();
+      // 菱形之間的小三角（鋸齒紋）
+      x.fillStyle = goldGrad(x, cx - t, cy - t, cx + t, cy + t);
+      const ex = horiz ? cx + s / 2 : cx, ey = horiz ? cy : cy + s / 2;
+      if (i < n - 1) { x.beginPath(); if (horiz) { x.moveTo(ex - 5, oy + 3); x.lineTo(ex + 5, oy + 3); x.lineTo(ex, oy + 11); x.moveTo(ex - 5, oy + t - 3); x.lineTo(ex + 5, oy + t - 3); x.lineTo(ex, oy + t - 11); } else { x.moveTo(ox + 3, ey - 5); x.lineTo(ox + 3, ey + 5); x.lineTo(ox + 11, ey); x.moveTo(ox + t - 3, ey - 5); x.lineTo(ox + t - 3, ey + 5); x.lineTo(ox + t - 11, ey); } x.fill(); }
+    }
+  };
+  run(m + t, m, w - 2 * (m + t), true); run(m + t, h - m - t, w - 2 * (m + t), true);
+  run(m, m + t, h - 2 * (m + t), false); run(w - m - t, m + t, h - 2 * (m + t), false);
+  // 四角：太陽紋（排灣族太陽之子的傳說）
+  [[m, m], [w - m - t, m], [m, h - m - t], [w - m - t, h - m - t]].forEach(([a, b]) => {
+    const cx = a + t / 2, cy = b + t / 2; x.fillStyle = goldGrad(x, cx - t / 2, cy - t / 2, cx + t / 2, cy + t / 2);
+    for (let k = 0; k < 12; k++) { const an = k / 12 * Math.PI * 2; x.beginPath(); x.moveTo(cx + Math.cos(an - 0.13) * t * 0.22, cy + Math.sin(an - 0.13) * t * 0.22); x.lineTo(cx + Math.cos(an) * t * 0.46, cy + Math.sin(an) * t * 0.46); x.lineTo(cx + Math.cos(an + 0.13) * t * 0.22, cy + Math.sin(an + 0.13) * t * 0.22); x.fill(); }
+    x.beginPath(); x.arc(cx, cy, t * 0.2, 0, 7); x.fill(); x.fillStyle = RED; x.beginPath(); x.arc(cx, cy, t * 0.08, 0, 7); x.fill();
   });
-  edge(m, m, w - 2 * m, true); edge(m, h - m - t, w - 2 * m, true);
-  edge(m, m + t, h - 2 * (m + t), false); edge(w - m - t, m + t, h - 2 * (m + t), false);
-  x.fillStyle = BLK; [[m, m], [w - m - t, m], [m, h - m - t], [w - m - t, h - m - t]].forEach(([a, b]) => x.fillRect(a, b, t, t));
-  x.fillStyle = YEL; [[m, m], [w - m - t, m], [m, h - m - t], [w - m - t, h - m - t]].forEach(([a, b]) => { x.beginPath(); x.arc(a + t / 2, b + t / 2, t * 0.22, 0, 7); x.fill(); });
-  x.strokeStyle = "#C9A24A"; x.lineWidth = 3; x.strokeRect(m + t + 18, m + t + 18, w - 2 * (m + t + 18), h - 2 * (m + t + 18));
+  // 燙金雙線框
+  const line = (o, lw) => { x.lineWidth = lw; x.strokeStyle = goldGrad(x, 0, 0, w, h); x.strokeRect(o, o, w - 2 * o, h - 2 * o); };
+  line(m - 10, 3); line(m + t + 14, 4); line(m + t + 24, 1.5);
+}
+function arcText(x, txt, r, mid, inward, font, color) {
+  // 沿圓弧排字：mid 為中心角，inward=false 時字頭朝外（上弧），true 時字頭朝內（下弧）
+  x.save(); x.font = font; x.fillStyle = color; x.textAlign = "center"; x.textBaseline = "middle";
+  const chars = [...txt], ws = chars.map(c => x.measureText(c).width + 4), tot = ws.reduce((a, b) => a + b, 0);
+  let a = mid - (inward ? -1 : 1) * tot / r / 2;
+  chars.forEach((c, i) => {
+    const step = ws[i] / r, an = a + (inward ? -1 : 1) * step / 2;
+    x.save(); x.translate(Math.cos(an) * r, Math.sin(an) * r); x.rotate(an + (inward ? -Math.PI / 2 : Math.PI / 2)); x.fillText(c, 0, 0); x.restore();
+    a += (inward ? -1 : 1) * step;
+  });
+  x.restore();
+}
+function goldSeal(x, cx, cy, R, dateTxt) {
+  x.save(); x.translate(cx, cy); x.rotate(-0.1);
+  x.shadowColor = "rgba(80,55,10,.35)"; x.shadowBlur = 18; x.shadowOffsetY = 6;
+  // 鋸齒外緣
+  x.beginPath(); for (let k = 0; k <= 72; k++) { const an = k / 72 * Math.PI * 2, rr = k % 2 ? R : R * 0.95; x.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); }
+  const rg = x.createRadialGradient(-R * 0.35, -R * 0.4, R * 0.1, 0, 0, R * 1.05);
+  rg.addColorStop(0, "#FFF4C4"); rg.addColorStop(0.35, "#E7C66C"); rg.addColorStop(0.7, "#B8892C"); rg.addColorStop(1, "#7A561A");
+  x.fillStyle = rg; x.fill(); x.shadowColor = "transparent";
+  // 內圈：壓紋環
+  const ring = (r, lw, c) => { x.lineWidth = lw; x.strokeStyle = c; x.beginPath(); x.arc(0, 0, r, 0, 7); x.stroke(); };
+  ring(R * 0.84, 3, "rgba(110,75,15,.75)"); ring(R * 0.86, 1.5, "rgba(255,245,200,.7)");
+  ring(R * 0.6, 2, "rgba(110,75,15,.7)"); ring(R * 0.62, 1, "rgba(255,245,200,.6)");
+  for (let k = 0; k < 64; k++) { const an = k / 64 * Math.PI * 2; x.fillStyle = "rgba(110,75,15,.6)"; x.beginPath(); x.arc(Math.cos(an) * R * 0.9, Math.sin(an) * R * 0.9, 1.6, 0, 7); x.fill(); }
+  const ink = "rgba(92,62,12,.92)", SERIF = '"Noto Serif TC", serif';
+  arcText(x, "嘉蘭樂學島", R * 0.72, -Math.PI / 2, false, "700 " + Math.round(R * 0.15) + "px " + SERIF, ink);
+  arcText(x, "JIALAN · LEARNING ISLANDS", R * 0.72, Math.PI / 2, true, "600 " + Math.round(R * 0.085) + "px Georgia, serif", ink);
+  x.textAlign = "center"; x.fillStyle = ink;
+  x.font = "700 " + Math.round(R * 0.2) + "px " + SERIF; x.fillText("學習", 0, -R * 0.06); x.fillText("紀念", 0, R * 0.2);
+  x.font = "600 " + Math.round(R * 0.085) + "px Georgia, serif"; x.fillText(dateTxt, 0, R * 0.42);
+  x.font = "700 " + Math.round(R * 0.11) + "px serif"; x.fillText("✦", -R * 0.42, R * 0.04); x.fillText("✦", R * 0.42, R * 0.04);
+  // 高光
+  x.globalCompositeOperation = "lighter"; const hl = x.createLinearGradient(-R, -R, R * 0.2, R * 0.2); hl.addColorStop(0, "rgba(255,255,255,.28)"); hl.addColorStop(0.5, "rgba(255,255,255,0)");
+  x.fillStyle = hl; x.beginPath(); x.arc(0, 0, R * 0.95, 0, 7); x.fill();
+  x.restore();
 }
 async function drawCert(rec, who) {
   const W = 1754, H = 1240, c = document.createElement("canvas"); c.width = W; c.height = H;
   const x = c.getContext("2d"), C = certCourse(rec);
   const DISP = '"LXGW WenKai TC", "Noto Serif TC", serif', SERIF = '"Noto Serif TC", serif';
   const roc = rec.date[0] - 1911, dateTxt = "中華民國 " + roc + " 年 " + rec.date[1] + " 月 " + rec.date[2] + " 日";
+  const isoDate = rec.date[0] + "." + String(rec.date[1]).padStart(2, "0") + "." + String(rec.date[2]).padStart(2, "0");
   const nameTxt = who.name || "", seatTxt = who.seat ? C.grade + "　" + who.seat + " 號" : C.grade;
-  const allText = "學習證書嘉蘭樂學島國小同學完成了的並在挑戰關卡中答對題獲得顆星特頒此證以資鼓勵．「」，。、" + nameTxt + seatTxt + C.subject + C.lesson + dateTxt + "0123456789";
+  const allText = "學習證書嘉蘭樂學島國小同學完成了的並在挑戰關卡中答對題獲得顆星特頒此證以資鼓勵紀念本僅作不代表正式成績．「」，。、" + nameTxt + seatTxt + C.subject + C.lesson + dateTxt + "0123456789";
   try { await Promise.all([document.fonts.load("700 80px \"LXGW WenKai TC\"", allText), document.fonts.load("700 40px \"Noto Serif TC\"", allText)]); } catch (e) {}
   const logo = await loadCertLogo();
 
+  // 紙張：米白底＋淡淡紙紋
   x.fillStyle = "#FBF6EA"; x.fillRect(0, 0, W, H);
-  paiwanBorder(x, W, H, 36, 44);
-  // 淡淡的海浪與山形浮水印（只畫在邊框內）
-  x.save(); x.beginPath(); x.rect(80, 80, W - 160, H - 160); x.clip(); x.globalAlpha = 0.07; x.fillStyle = "#1F6FB2";
-  for (let k = 0; k < 3; k++) { x.beginPath(); x.moveTo(0, H); for (let i = 0; i <= 40; i++) x.lineTo(i / 40 * W, H - 150 - k * 46 + Math.sin(i * 0.9 + k) * 16); x.lineTo(W, H); x.closePath(); x.fill(); }
-  x.fillStyle = "#3E7D4F"; x.beginPath(); x.moveTo(W * 0.52, H); x.lineTo(W * 0.72, H * 0.6); x.lineTo(W * 0.8, H * 0.68); x.lineTo(W * 0.9, H * 0.55); x.lineTo(W, H * 0.66); x.lineTo(W, H); x.closePath(); x.fill();
+  paiwanBorder(x, W, H, 40, 46);
+  const L0 = 110, T0 = 110, R0 = W - 110, B0 = H - 110;
+  x.save(); x.beginPath(); x.rect(L0, T0, R0 - L0, B0 - T0); x.clip();
+  const vg = x.createRadialGradient(W / 2, H / 2, 200, W / 2, H / 2, W * 0.62); vg.addColorStop(0, "rgba(255,255,255,0)"); vg.addColorStop(1, "rgba(201,162,74,.10)"); x.fillStyle = vg; x.fillRect(0, 0, W, H);
+  x.globalAlpha = 0.06; x.fillStyle = "#1F6FB2";
+  for (let k = 0; k < 3; k++) { x.beginPath(); x.moveTo(0, H); for (let i = 0; i <= 40; i++) x.lineTo(i / 40 * W, H - 170 - k * 44 + Math.sin(i * 0.9 + k) * 14); x.lineTo(W, H); x.closePath(); x.fill(); }
+  x.fillStyle = "#3E7D4F"; x.beginPath(); x.moveTo(W * 0.5, H); x.lineTo(W * 0.7, H * 0.62); x.lineTo(W * 0.78, H * 0.69); x.lineTo(W * 0.88, H * 0.57); x.lineTo(W, H * 0.68); x.lineTo(W, H); x.closePath(); x.fill();
   x.restore();
-  x.strokeStyle = "#C9A24A"; x.lineWidth = 3; x.strokeRect(98, 98, W - 196, H - 196);
 
   x.textAlign = "center"; x.textBaseline = "alphabetic";
-  if (logo) x.drawImage(logo, W / 2 - 70, 132, 140, 140);
-  x.fillStyle = "#1F4E4A"; x.font = "700 40px " + SERIF; x.fillText("嘉 蘭 樂 學 島", W / 2, 322);
-  x.fillStyle = "#8E2A22"; x.font = "700 112px " + DISP; x.fillText("學 習 證 書", W / 2, 452);
-  x.strokeStyle = "#C9A24A"; x.lineWidth = 3; x.beginPath(); x.moveTo(W / 2 - 300, 490); x.lineTo(W / 2 + 300, 490); x.stroke();
-  x.fillStyle = "#C9A24A"; x.beginPath(); x.moveTo(W / 2, 478); x.lineTo(W / 2 + 12, 490); x.lineTo(W / 2, 502); x.lineTo(W / 2 - 12, 490); x.closePath(); x.fill();
+  if (logo) x.drawImage(logo, W / 2 - 62, 150, 124, 124);
+  x.save(); x.font = "600 22px Georgia, serif"; x.letterSpacing = "8px"; x.fillStyle = "#9A7A34"; x.fillText("JIALAN · LEARNING ISLANDS", W / 2, 312); x.restore();
+  goldText(x, "嘉 蘭 樂 學 島", W / 2, 360, 38, "900 38px " + SERIF);
+  goldText(x, "學 習 證 書", W / 2, 478, 110, "700 110px " + DISP);
+  // 燙金分隔線＋菱形
+  const rule = (y, half) => { x.fillStyle = goldGrad(x, W / 2 - half, y, W / 2 + half, y); x.fillRect(W / 2 - half, y - 1.5, half * 2, 3); diamond(x, W / 2, y, 14, 10); x.fill(); x.fillStyle = "#A8322A"; diamond(x, W / 2, y, 5, 4); x.fill(); };
+  rule(512, 300);
 
-  x.fillStyle = "#2B2B2B"; x.font = "400 44px " + DISP; x.fillText(seatTxt, W / 2, 588);
-  x.font = "700 96px " + DISP; x.fillStyle = "#1F2A28"; x.fillText(nameTxt + "  同學", W / 2, 700);
-  const nw = Math.max(320, x.measureText(nameTxt + "  同學").width + 60);
-  x.strokeStyle = "#B9A27A"; x.lineWidth = 2; x.beginPath(); x.moveTo(W / 2 - nw / 2, 724); x.lineTo(W / 2 + nw / 2, 724); x.stroke();
+  x.fillStyle = "#3A3A3A"; x.font = "400 42px " + DISP; x.fillText(seatTxt, W / 2, 598);
+  x.font = "700 96px " + DISP; x.fillStyle = "#1F2A28"; x.fillText(nameTxt + "  同學", W / 2, 706);
+  const nw = Math.max(320, x.measureText(nameTxt + "  同學").width + 80);
+  x.fillStyle = goldGrad(x, W / 2 - nw / 2, 730, W / 2 + nw / 2, 730); x.fillRect(W / 2 - nw / 2, 729, nw, 2);
 
-  x.font = "400 46px " + DISP; x.fillStyle = "#333";
-  x.fillText("完成了「" + C.grade + C.subject + "．" + C.lesson + "」的學習，", W / 2, 812);
+  x.font = "400 44px " + DISP; x.fillStyle = "#333";
+  x.fillText("完成了「" + C.grade + C.subject + "．" + C.lesson + "」的學習，", W / 2, 814);
   const stars = "★".repeat(rec.stars) + "☆".repeat(3 - rec.stars);
-  const l2a = "並在挑戰關卡中答對 " + rec.score + " / " + rec.total + " 題，獲得 ", l2b = stars, l2c = "。";
+  const l2a = "並在挑戰關卡中答對 " + rec.score + " / " + rec.total + " 題，獲得 ", l2c = "。";
   const wa = x.measureText(l2a).width, wc = x.measureText(l2c).width;
-  x.font = "400 50px " + SERIF; const wb = x.measureText(l2b).width;
+  x.font = "400 50px " + SERIF; const wb = x.measureText(stars).width;
   let sx = W / 2 - (wa + wb + wc) / 2; x.textAlign = "left";
-  x.font = "400 46px " + DISP; x.fillText(l2a, sx, 884); sx += wa;
-  x.font = "400 50px " + SERIF; x.fillStyle = "#E0A21B"; x.fillText(l2b, sx, 886); sx += wb;
-  x.font = "400 46px " + DISP; x.fillStyle = "#333"; x.fillText(l2c, sx, 884);
-  x.textAlign = "center"; x.fillText("特頒此證，以資鼓勵。", W / 2, 956);
+  x.font = "400 44px " + DISP; x.fillText(l2a, sx, 884); sx += wa;
+  x.font = "400 50px " + SERIF; x.fillStyle = goldGrad(x, sx, 846, sx + wb, 890); x.fillText(stars, sx, 886); sx += wb;
+  x.font = "400 44px " + DISP; x.fillStyle = "#333"; x.fillText(l2c, sx, 884);
+  x.textAlign = "center"; x.fillText("特頒此證，以資鼓勵。", W / 2, 952);
 
-  x.textAlign = "left"; x.font = "400 38px " + DISP; x.fillStyle = "#555"; x.fillText(dateTxt, 210, 1086);
-  // 樂學島章（紀念章，非公文印信）
-  x.save(); x.translate(W - 330, 1030); x.rotate(-0.12);
-  x.strokeStyle = "#C2362C"; x.fillStyle = "#C2362C"; x.lineWidth = 7; x.globalAlpha = 0.88;
-  x.beginPath(); x.arc(0, 0, 92, 0, 7); x.stroke(); x.lineWidth = 2.5; x.beginPath(); x.arc(0, 0, 80, 0, 7); x.stroke();
-  x.textAlign = "center"; x.font = "700 40px " + SERIF; x.fillText("嘉蘭", 0, -14); x.fillText("樂學島", 0, 36);
-  x.font = "700 17px " + SERIF; x.fillText("學習紀念章", 0, 60);
-  x.restore();
+  x.textAlign = "left"; x.font = "400 36px " + DISP; x.fillStyle = "#4A4A4A"; x.fillText(dateTxt, 220, 1050);
+  x.font = "400 22px " + DISP; x.fillStyle = "#8A8A80"; x.textAlign = "center"; x.fillText("本證書僅作學習紀念，不代表正式成績。", W / 2, 1080);
+  goldSeal(x, W - 330, 1000, 118, isoDate);
   return c;
 }
 function certFileName(rec, who) { const C = certCourse(rec); return "嘉蘭樂學島證書_" + C.grade + C.subject + "_" + (C.no || rec.title) + (who.name ? "_" + who.name : "") + ".png"; }
@@ -2532,7 +2596,7 @@ function certView(host, rec, back) {
   $("#certDl").addEventListener("click", () => {
     if (!canvas) return;
     canvas.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = certFileName(rec, { name: $("#certName").value.trim() }); document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }, "image/png");
-    speak("證書下載好了，恭喜你！");
+    playChime(); speak("證書下載好了，恭喜你！");
   });
   $("#certPrint").addEventListener("click", () => {
     if (!canvas) return;
@@ -2555,6 +2619,101 @@ function openCerts() {
       : '<div class="cert-empty">還沒有證書喔！<br>到「六年級 → 國語」完成一課的挑戰關卡，就能拿到第一張。<br><button class="btn" data-go="g6-chinese">去六年級國語館</button></div>') + '</div>', "list");
   $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
   $all("#modal .cert-item").forEach(b => b.addEventListener("click", () => certView($("#certHost"), all[b.getAttribute("data-pk")], openCerts)));
+}
+
+/* ===================== 慶祝：獲獎號角＋鈴聲＋掌聲、彩帶 ===================== */
+let sfxCtx = null;
+function sfxAudio() {
+  if (music.ctx) return music.ctx;
+  const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
+  if (!sfxCtx) sfxCtx = new AC();
+  if (sfxCtx.state === "suspended") sfxCtx.resume();
+  return sfxCtx;
+}
+function playCheer(big) {
+  const ctx = sfxAudio(); if (!ctx) return 0;
+  if (music.started) { musicDuck(true); setTimeout(() => musicDuck(false), 3200); }
+  const out = ctx.createGain(); out.gain.value = 0.9; out.connect(ctx.destination);
+  const t0 = ctx.currentTime + 0.05, f = m => 440 * Math.pow(2, (m - 69) / 12);
+  // 號角：鋸齒波＋濾波器開合，模擬銅管
+  const brass = (m, t, d, v) => {
+    [0, 0.06].forEach((det, k) => {
+      const o = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
+      o.type = "sawtooth"; o.frequency.value = f(m) * (1 + det * 0.01); o.detune.setValueAtTime(-25, t); o.detune.linearRampToValueAtTime(0, t + 0.06);
+      lp.type = "lowpass"; lp.Q.value = 2; lp.frequency.setValueAtTime(500, t); lp.frequency.linearRampToValueAtTime(3200, t + 0.07); lp.frequency.exponentialRampToValueAtTime(1400, t + d);
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v * (k ? 0.5 : 1), t + 0.03); g.gain.setValueAtTime(v * (k ? 0.5 : 1) * 0.8, t + d * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(lp); lp.connect(g); g.connect(out); o.start(t); o.stop(t + d + 0.05);
+    });
+  };
+  // 鈴聲：正弦波＋泛音，長尾音
+  const bell = (m, t, v) => {
+    [[1, 1], [2.76, 0.35], [5.4, 0.12]].forEach(([r, a]) => {
+      const o = ctx.createOscillator(), g = ctx.createGain(); o.type = "sine"; o.frequency.value = f(m) * r;
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v * a, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.4 / r + 0.3);
+      o.connect(g); g.connect(out); o.start(t); o.stop(t + 2);
+    });
+  };
+  // 號角樂句：Sol-Sol-Sol-Do～（C 大調），再接大三和弦
+  const seq = [[67, 0, 0.14], [67, 0.16, 0.14], [67, 0.32, 0.14], [72, 0.48, 0.5], [69, 0.98, 0.16], [72, 1.16, 0.16]];
+  seq.forEach(([m, dt, d]) => brass(m, t0 + dt, d, 0.11));
+  [60, 64, 67, 72].forEach(m => brass(m, t0 + 1.36, 1.1, 0.07));
+  brass(48, t0 + 1.36, 1.1, 0.08);
+  // 定音鼓
+  [0, 0.48, 1.36].forEach(dt => {
+    const o = ctx.createOscillator(), g = ctx.createGain(), t = t0 + dt; o.type = "sine";
+    o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.35);
+    g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5); o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.55);
+  });
+  // 亮晶晶的鈴聲上行
+  [84, 88, 91, 96, 100].forEach((m, i) => bell(m, t0 + 1.4 + i * 0.07, 0.05));
+  // 掌聲：一串短促的帶通雜訊
+  if (big !== false) {
+    const len = ctx.sampleRate * 2.4, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let n = 0; n < 340; n++) {
+      const st = Math.floor((Math.random() * 2.1) * ctx.sampleRate), L = Math.floor(ctx.sampleRate * 0.012), a = 0.3 + Math.random() * 0.7;
+      for (let i = 0; i < L && st + i < len; i++) d[st + i] += (Math.random() * 2 - 1) * a * Math.exp(-i / (L * 0.25));
+    }
+    const src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain(), t = t0 + 1.3;
+    src.buffer = buf; bp.type = "bandpass"; bp.frequency.value = 1800; bp.Q.value = 0.6;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.22, t + 0.3); g.gain.setValueAtTime(0.22, t + 1.4); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+    src.connect(bp); bp.connect(g); g.connect(out); src.start(t);
+  }
+  return 2400;   // 樂句長度（毫秒），讓語音接在後面
+}
+function playChime() {
+  const ctx = sfxAudio(); if (!ctx) return;
+  const t = ctx.currentTime + 0.02, out = ctx.createGain(); out.gain.value = 0.4; out.connect(ctx.destination);
+  [[79, 0], [84, 0.09], [88, 0.18]].forEach(([m, dt]) => {
+    const o = ctx.createOscillator(), g = ctx.createGain(); o.type = "sine"; o.frequency.value = 440 * Math.pow(2, (m - 69) / 12);
+    g.gain.setValueAtTime(0.0001, t + dt); g.gain.linearRampToValueAtTime(0.12, t + dt + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.9);
+    o.connect(g); g.connect(out); o.start(t + dt); o.stop(t + dt + 1);
+  });
+}
+function confetti(ms = 3600) {
+  if (reduceMotion) return;
+  const cv = document.createElement("canvas"); cv.className = "confetti"; document.body.appendChild(cv);
+  const dpr = Math.min(2, devicePixelRatio || 1), W = innerWidth, H = innerHeight; cv.width = W * dpr; cv.height = H * dpr;
+  const x = cv.getContext("2d"); x.scale(dpr, dpr);
+  const COLS = ["#E8B33A", "#F7E7A6", "#C8423B", "#2B2B2B", "#3E7D4F", "#1F6FB2", "#FFFFFF", "#D9B45A"];
+  const ps = Array.from({ length: Math.min(180, Math.round(W / 6)) }, (_, i) => {
+    const side = i % 2 ? 1 : -1;
+    const hgt = H * (0.4 + Math.random() * 0.45), vy = -Math.sqrt(2 * 0.32 * hgt), fr = -vy / 0.32;
+    return { x: side > 0 ? W * 0.04 : W * 0.96, y: H * 0.92, vx: side * W * (0.12 + Math.random() * 0.4) / fr, vy,
+      w: 6 + Math.random() * 7, h: 8 + Math.random() * 10, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, c: COLS[i % COLS.length], diamond: i % 5 === 0 };
+  });
+  const start = performance.now(); let last = start;
+  const step = now => {
+    const dt = Math.min(2.5, (now - last) / 16.7); last = now; const age = now - start;
+    x.clearRect(0, 0, W, H); x.globalAlpha = age > ms - 700 ? Math.max(0, (ms - age) / 700) : 1;
+    ps.forEach(p => {
+      p.vy += 0.32 * dt; p.vx *= Math.pow(0.985, dt); p.vy = Math.min(p.vy, 4.5); p.x += (p.vx + Math.sin(age / 300 + p.r) * 0.8) * dt; p.y += p.vy * dt; p.r += p.vr * dt;
+      x.save(); x.translate(p.x, p.y); x.rotate(p.r); x.scale(1, Math.abs(Math.cos(age / 180 + p.r)) * 0.8 + 0.2); x.fillStyle = p.c;
+      if (p.diamond) { x.beginPath(); x.moveTo(0, -p.h / 2); x.lineTo(p.w / 2, 0); x.lineTo(0, p.h / 2); x.lineTo(-p.w / 2, 0); x.fill(); } else x.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      x.restore();
+    });
+    if (age < ms) requestAnimationFrame(step); else cv.remove();
+  };
+  requestAnimationFrame(step);
 }
 
 function openList() {

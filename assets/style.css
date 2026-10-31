@@ -552,3 +552,4 @@ h1, h2, h3 { font-family: var(--font-display); line-height: 1.3; margin: 0; text
   body.printing #printArea { display: block; }
   body.printing #printArea img { width: 100%; height: auto; display: block; }
 }
+.confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 60; }
