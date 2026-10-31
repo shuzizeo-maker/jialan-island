@@ -2215,7 +2215,7 @@ function openLesson(n, key, bn, id) {
     panel.appendChild(nav);
     $all("[data-next]", nav).forEach(b => b.addEventListener("click", () => {
       const t = b.getAttribute("data-next"); show(t); speak(TABS.find(x => x[0] === t)[1]);
-      const tb = $(".tabs"); if (tb && tb.scrollIntoView) tb.scrollIntoView({ block: "start", behavior: "smooth" });
+      sheetScroll($(".tabs"), "start");
     }));
     const rb = $("[data-read]", nav);
     if (rb) rb.addEventListener("click", () => {
@@ -2286,7 +2286,7 @@ function tabText(p, L) {
   const mark = i => $all(".pline", p).forEach(e => e.classList.toggle("reading", +e.getAttribute("data-i") === i));
   function readFrom(i) {
     if (!reading || i >= all.length) { reading = false; mark(-1); if ($("#readAll")) $("#readAll span").textContent = "朗讀全文"; return; }
-    mark(i); const el = $('.pline[data-i="' + i + '"]', p); if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    mark(i); const el = $('.pline[data-i="' + i + '"]', p); if (el) sheetScroll(el);
     speak(all[i], { force: true, end: () => setTimeout(() => readFrom(i + 1), 250) });
   }
   if ($("#readAll")) $("#readAll").addEventListener("click", function () {
@@ -2637,7 +2637,7 @@ function certView(host, rec, back) {
   });
   if (back) $("#certBack").addEventListener("click", back);
   render();
-  if (!who.name) setTimeout(() => { const i = $("#certName"); if (i) i.focus(); }, 200);
+  if (!who.name) setTimeout(() => { const i = $("#certName"); if (i) i.focus({ preventScroll: true }); }, 200);
 }
 function openCerts() {
   modalBack = "home";
@@ -2803,31 +2803,81 @@ function addNPC(model, pos, data, labelOff) {
 function makeNPCs() {
   let i = 0;
   GRADES.forEach(gr => {
-    const isl = islands[gr.n], camDir = new V3(0, 0, 1).lerp(isl.pos.clone().setY(0).normalize(), 0.3).normalize();
-    SUBJECTS.forEach(s => {
-      // 站在小島靠近鏡頭的那一側，名字才不會和學習館的標籤疊在一起
-      const b = isl.bld[s.key], side = new V3(camDir.z, 0, -camDir.x);
-      const p = isl.pos.clone().add(b.local).addScaledVector(camDir, 1.6).addScaledVector(side, 0.55); p.y = 0.03;
-      const m = tutorModel(gr.n, s.key, i++); m.rotation.y = b.th + Math.PI;
-      addNPC(m, p, { type: "npc", g: gr.n, key: s.key, name: tutorName(gr.n, s.key) }, 2.0);
+    const isl = islands[gr.n];
+    SUBJECTS.forEach((s, k) => {
+      // 助教在自己的年級島上散步：主島外圈 → 走吊橋到某座學習館小島繞一圈 → 再走回來
+      const ang = (k / SUBJECTS.length) * Math.PI * 2 + Math.random() * 0.3;
+      const m = tutorModel(gr.n, s.key, i++);
+      const o = addNPC(m, isl.pos.clone().add(new V3(Math.cos(ang) * 4.1, 0.03, Math.sin(ang) * 4.1)), { type: "npc", g: gr.n, key: s.key, name: tutorName(gr.n, s.key) }, 2.0);
+      o.walk = { isl, home: s.key, st: "ring", a: ang, ta: ang, idle: 1 + Math.random() * 4, t: 0, sp: 0.55 + Math.random() * 0.2 };
+      pickWalkTarget(o);
+      if (Math.random() < 0.65) {   // 一開始就有一半以上在各館小島上散步，避免全擠在主島
+        const w = o.walk; w.target = s.key; w.ta = angOf(isl.bld[s.key].out); w.a = w.ta; w.st = "islet";
+        w.ia0 = w.ta + Math.PI; w.ia = w.ia0 + (Math.random() - 0.5) * 4; w.dir = Math.random() < 0.5 ? 1 : -1; w.lap = Math.random() * 3; w.back = false; w.idle = Math.random() * 3;
+        walkPos(o, _np); m.position.copy(_np);
+      }
     });
   });
   const h = hostModel(); h.rotation.y = 0.3;
   addNPC(h, new V3(-4.4, 0.06, 8.0), { type: "host", name: HOST_NAME }, 2.7);
 }
-const _np = new V3();
+const RING_R = 4.1, ISLET_R = 1.8;
+const angOf = v => Math.atan2(v.z, v.x);
+const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+function pickWalkTarget(o) {
+  const w = o.walk, keys = SUBJECTS.map(x => x.key);
+  w.target = Math.random() < 0.6 ? w.home : keys[Math.floor(Math.random() * keys.length)];
+  w.ta = angOf(w.isl.bld[w.target].out);
+}
+function walkPos(o, out) {
+  // 依目前狀態算出助教的世界座標（不會站在學習館門口：小島上沿著外圈走）
+  const w = o.walk, P = w.isl.pos, b = w.isl.bld[w.target];
+  if (w.st === "ring") return out.set(P.x + Math.cos(w.a) * RING_R, 0.03, P.z + Math.sin(w.a) * RING_R);
+  if (w.st === "out" || w.st === "in") {
+    const t = w.st === "out" ? w.t : 1 - w.t, r0 = RING_R, r1 = RI - ISLET_R, r = r0 + (r1 - r0) * t;
+    const lift = (r > RM - 0.2 && r < RI - RS + 0.2) ? Math.sin(Math.PI * (r - (RM - 0.2)) / ((RI - RS + 0.2) - (RM - 0.2))) * 0.35 : 0;
+    return out.set(P.x + b.out.x * r, 0.03 + lift, P.z + b.out.z * r);
+  }
+  // islet：繞著學習館走
+  const c = b.local, a = w.ia;
+  return out.set(P.x + c.x + Math.cos(a) * ISLET_R, 0.03, P.z + c.z + Math.sin(a) * ISLET_R);
+}
+const _np = new V3(), _np2 = new V3();
 function stepNPC(dt, time) {
   npcs.forEach(o => {
-    const g = o.obj;
-    const vis = o.data.type === "host" ? (focus.g === 0 || focus.g === null) : focus.g === o.data.g;
+    const g = o.obj, vis = o.data.type === "host" ? (focus.g === 0 || focus.g === null) : focus.g === o.data.g;
     if (!vis && !o.wave) return;
-    // 慢慢轉向鏡頭
-    const want = Math.atan2(camera.position.x - g.position.x, camera.position.z - g.position.z);
-    let d = want - g.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); g.rotation.y += d * Math.min(1, dt * 2.5);
+    let moving = false, faceCam = true;
+    const w = o.walk;
+    if (w && !o.wave && !ui.paused) {
+      const step = w.sp * dt;
+      if (w.idle > 0) w.idle -= dt;
+      else if (w.st === "ring") {
+        const d = angDiff(w.a, w.ta), da = step / RING_R;
+        if (Math.abs(d) <= da) { w.a = w.ta; w.st = "out"; w.t = 0; } else { w.a += Math.sign(d) * da; moving = true; }
+      } else if (w.st === "out" || w.st === "in") {
+        w.t += step / (RI - ISLET_R - RING_R); moving = true;
+        if (w.t >= 1) {
+          if (w.st === "out") { w.st = "islet"; w.ia = angOf(w.isl.bld[w.target].out) + Math.PI; w.ia0 = w.ia; w.dir = Math.random() < 0.5 ? 1 : -1; w.lap = Math.PI * (1.2 + Math.random() * 0.6); w.idle = 1 + Math.random() * 2; }
+          else { w.st = "ring"; w.a = w.ta; pickWalkTarget(o); w.idle = 2 + Math.random() * 5; }
+        }
+      } else if (w.st === "islet") {
+        const da = step / ISLET_R; w.ia += w.dir * da; w.lap -= da; moving = true;
+        if (w.lap <= 0 && !w.back) { w.dir = -w.dir; w.back = true; w.idle = 0.8 + Math.random() * 1.5; }
+        if (w.back && Math.abs(angDiff(w.ia, w.ia0)) < da * 1.5) { w.back = false; w.ia = w.ia0; w.st = "in"; w.t = 0; w.idle = 0.6; }
+      }
+      walkPos(o, _np); _np2.copy(g.position); g.position.x = _np.x; g.position.z = _np.z; g.position.y = _np.y;
+      if (moving) { const dx = _np.x - _np2.x, dz = _np.z - _np2.z; if (dx * dx + dz * dz > 1e-8) { g.rotation.y = Math.atan2(dx, dz); faceCam = false; } }
+    }
+    if (faceCam) {
+      const want = Math.atan2(camera.position.x - g.position.x, camera.position.z - g.position.z);
+      const d = angDiff(g.rotation.y, want); g.rotation.y += d * Math.min(1, dt * 2.5);
+    }
     const arm = g.userData.arms[1];
-    if (o.wave > 0) { o.wave = Math.max(0, o.wave - dt); arm.rotation.z = 2.4 + Math.sin(time * 12) * 0.35; }
-    else { arm.rotation.z = 0; arm.rotation.x = Math.sin(time * 1.6 + g.userData.ph) * 0.12; }
-    g.position.y = 0.03 + Math.abs(Math.sin(time * 2 + g.userData.ph)) * 0.02;
+    if (o.wave > 0) { o.wave = Math.max(0, o.wave - dt); arm.rotation.z = 2.4 + Math.sin(time * 12) * 0.35; swing(g, time, 0); }
+    else if (moving) { arm.rotation.z = 0; swing(g, time * 0.8, 0.45); }
+    else { arm.rotation.z = 0; swing(g, time, 0); arm.rotation.x = Math.sin(time * 1.6 + g.userData.ph) * 0.12; }
+    if (!w) g.position.y = 0.06;
   });
 }
 function npcWave(data) { const o = npcs.find(n => n.data.type === data.type && n.data.g === data.g && n.data.key === data.key); if (o) o.wave = 2.2; }
@@ -2846,11 +2896,25 @@ function openNPC(d) {
     '<p class="npc-why">「嘉」是嘉蘭國小，「' + g.name[0] + '」是' + g.name + '，「' + s.name[0] + '」是' + s.name + '</p></div></div>' +
     '<div class="npc-bubble">' + esc(hello) + '</div>' +
     '<h3>📚 ' + esc(s.name) + '學習小撇步</h3><p class="npc-tip">' + esc(SUBJECT_TIPS[d.key] || s.desc) + '</p>' +
-    (open ? '<p class="npc-prog">你在這一館：⭐ ' + starN + ' 顆星．🎓 ' + certN + ' 張證書</p>' : "") +
-    '<div class="row npc-act">' + (open ? '<button class="btn" data-go="g' + d.g + '-' + d.key + '">進入' + esc(s.name) + '館 →</button>' : '<button class="btn ghost" data-go="g' + d.g + '-' + d.key + '">看看' + esc(s.name) + '館</button>') +
+    (open ? '<h3>📖 現在可以學</h3><div class="npc-lessons" id="npcLessons"><div class="loading">讀取中…</div></div><p class="npc-prog">你在這一館：⭐ ' + starN + ' 顆星．🎓 ' + certN + ' 張證書</p>' : "") +
+    '<div class="row npc-act">' + (open ? '<button class="btn ghost" data-go="g' + d.g + '-' + d.key + '">看' + esc(s.name) + '館全部課程</button>' : '<button class="btn ghost" data-go="g' + d.g + '-' + d.key + '">看看' + esc(s.name) + '館</button>') +
     '<button class="say" id="npcSay">' + ICON_SPEAK + '聽一聽</button></div></div>', "npc-sheet");
   $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
   $("#npcSay").addEventListener("click", () => speak(hello + "學習小撇步：" + (SUBJECT_TIPS[d.key] || ""), { force: true }));
+  if (open) {
+    const books = booksOf(d.g, d.key), fill = () => {
+      const box = $("#npcLessons"); if (!box) return;
+      const rows = []; let pending = false;
+      books.forEach(b => {
+        if (!b.data) { pending = !b.error; return; }
+        b.data.units.forEach(u => u.items.forEach(it => { if ((it.live || previewMode) && b.data.lessons[it.id]) rows.push({ k: lessonHash(b, it.id), it }); }));
+      });
+      box.innerHTML = rows.length ? rows.map(r => '<button class="lesson open" data-go="' + r.k + '"><span class="no">' + esc(r.it.no) + '</span><span class="tt"><b>' + esc(r.it.title) + '</b><small>' + starsOf(r.k) + '</small></span><span class="go">開始 →</span></button>').join("")
+        : pending ? '<div class="loading">讀取中…</div>' : '<p class="npc-tip">目前還沒有開放的課，請再等等。</p>';
+      $all("[data-go]", box).forEach(x => x.addEventListener("click", () => go(x.getAttribute("data-go"))));
+    };
+    fill(); books.filter(b => !b.data && !b.error).forEach(b => loadBook(b).catch(e => { b.error = e.message; }).then(fill));
+  }
   speak(hello);
 }
 const HOST_FAQ = [
@@ -2922,6 +2986,20 @@ function stepLamp(dt) {
   }
 }
 
+// 只捲動彈出視窗本身，不讓整個頁面被捲走（scrollIntoView 會連外層一起捲）
+function sheetScroll(el, mode) {
+  const sh = el && el.closest(".sheet"); if (!sh) return;
+  const r = el.getBoundingClientRect(), sr = sh.getBoundingClientRect();
+  let top = null;
+  if (mode === "start") top = sh.scrollTop + r.top - sr.top - 8;
+  else if (r.top < sr.top + 8) top = sh.scrollTop + r.top - sr.top - 8;
+  else if (r.bottom > sr.bottom - 8) top = sh.scrollTop + r.bottom - sr.bottom + 8;
+  if (top !== null) sh.scrollTo({ top, behavior: reduceMotion ? "auto" : "smooth" });
+}
+function lockPageScroll() {
+  const fix = () => { [document.scrollingElement, document.documentElement, document.body, $("#app")].forEach(e => { if (e && (e.scrollTop || e.scrollLeft)) { e.scrollTop = 0; e.scrollLeft = 0; } }); };
+  addEventListener("scroll", fix, true); addEventListener("resize", fix); fix();
+}
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -3074,7 +3152,7 @@ function route() {
   if (h !== "home") hideHero();
   if (h === "hub") { focus.g = 0; focus.key = null; panelHub(); fly("hub", () => { const t = new V3(0, 0.6, 0), p = new V3(3, isMobile() ? 38 : 25, isMobile() ? 44 : 30); shiftForPanel(t, p); return { target: t, pos: p }; }); }
   else if ((m = h.match(/^g([1-6])$/))) { focus.g = +m[1]; focus.key = null; panelIsland(+m[1]); fly(h, () => islandPose(+m[1])); speak(GRADES[m[1] - 1].name + "學習島"); }
-  else if ((m = h.match(/^g([1-6])-([a-z]+)$/)) && subjectOf(m[2])) { focus.g = +m[1]; focus.key = m[2]; panelSubject(+m[1], m[2]); fly(h, () => buildingPose(+m[1], m[2])); markVisited(h); }
+  else if ((m = h.match(/^g([1-6])-([a-z]+)$/)) && subjectOf(m[2])) { if (panelMin()) setPanelMin(false, false); focus.g = +m[1]; focus.key = m[2]; panelSubject(+m[1], m[2]); fly(h, () => buildingPose(+m[1], m[2])); markVisited(h); }
   else if ((m = h.match(/^g([1-6])-([a-z]+)-(?:(\d+)-)?([A-Za-z0-9]+)$/)) && subjectOf(m[2])) {
     const same = focus.g === +m[1] && focus.key === m[2] && !$("#panel").hidden;
     focus.g = +m[1]; focus.key = m[2]; if (!same) panelSubject(+m[1], m[2], true); fly("g" + m[1] + "-" + m[2], () => buildingPose(+m[1], m[2])); markVisited("g" + m[1] + "-" + m[2]); openLesson(+m[1], m[2], +(m[3] || 1), m[4]);
@@ -3389,6 +3467,7 @@ function start() {
   $("#listBtn").addEventListener("click", () => go("list"));
   $("#certBtn").addEventListener("click", () => go("certs")); updateCertCount();
   $("#guideBtn").addEventListener("click", () => go("guide"));
+  lockPageScroll();
   $("#hostBtn").addEventListener("click", () => openNPC({ type: "host", name: HOST_NAME }));
   $("#lampBtn").addEventListener("click", () => setLamp(!lamp.on));
   try { if (localStorage.getItem("jialan:lamp") === "1") setLamp(true, true); } catch (e) {}
