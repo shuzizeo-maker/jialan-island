@@ -2364,9 +2364,11 @@ function tabQuiz(p, L, pk) {
     const prog = store("progress") || {}; if ((prog[pk] || 0) < stars) { prog[pk] = stars; store("progress", prog); }
     p.innerHTML = '<div class="result"><div class="big-stars" aria-label="' + stars + ' 顆星">' + "★★★".slice(0, stars) + '<span style="opacity:.25">' + "★★★".slice(stars) + '</span></div>' +
       '<h2>' + (stars === 3 ? "太厲害了！" : stars === 2 ? "做得很好！" : "繼續加油！") + '</h2><p>' + qs.length + ' 題答對 ' + score + ' 題</p>' +
-      '<div class="row" style="justify-content:center"><button class="btn" id="again">再挑戰一次</button><button class="btn ghost m-back">回課程列表</button></div></div>';
-    speak(qs.length + "題答對" + score + "題。" + (stars === 3 ? "太厲害了！" : stars === 2 ? "做得很好！" : "繼續加油！"));
+      (stars >= CERT_STARS ? '<p class="cert-earn">🎓 恭喜！你可以領取這一課的學習證書。</p>' : '<p class="cert-earn no">答對 7 成以上（2 顆星）就能領取學習證書，再挑戰一次吧！</p>') +
+      '<div class="row" style="justify-content:center">' + (stars >= CERT_STARS ? '<button class="btn" id="getCert">🎓 領取證書</button>' : "") + '<button class="btn' + (stars >= CERT_STARS ? " ghost" : "") + '" id="again">再挑戰一次</button><button class="btn ghost m-back">回課程列表</button></div></div>';
+    speak(qs.length + "題答對" + score + "題。" + (stars === 3 ? "太厲害了！" : stars === 2 ? "做得很好！" : "繼續加油！") + (stars >= CERT_STARS ? "可以領取證書了！" : ""));
     $("#again").addEventListener("click", () => { idx = 0; score = 0; qs = L.quiz.slice(); render(); });
+    if (stars >= CERT_STARS) { const rec = saveCert(pk, L, score, qs.length, stars); $("#getCert").addEventListener("click", () => certView(p, rec, finish)); }
     $(".m-back", p).addEventListener("click", () => go(modalBack));
   }
   p.innerHTML = '<div class="result"><h2>挑戰關卡</h2><p>共 ' + qs.length + ' 題，全部用點的就可以作答。<br>答對 9 成以上可以得到 3 顆星！</p><button class="btn" id="start">開始挑戰</button></div>';
@@ -2411,9 +2413,153 @@ function openTeacher() {
     loadBook(b).catch(e => { b.error = e.message; }).then(() => { if (location.hash === "#teacher") openTeacher(); });
   }));
 }
+/* ===================== 學習證書：每一課測驗 2 顆星（答對 7 成）以上即可領取 ===================== */
+const CERT_STARS = 2;
+function certCourse(rec) {
+  const g = GRADES[rec.g - 1], s = subjectOf(rec.key);
+  const no = !rec.no ? "" : /[第課]/.test(rec.no) ? rec.no : "第" + rec.no + "課";
+  return { grade: g ? g.name : "", subject: s ? s.name : "", lesson: (no ? no + "　" : "") + rec.title, no };
+}
+function saveCert(pk, L, score, total, stars) {
+  const m = pk.match(/^g([1-6])-([a-z]+)-/); if (!m) return null;
+  const all = store("certs") || {}, old = all[pk], d = new Date();
+  const rec = { pk, g: +m[1], key: m[2], no: L.no || "", title: L.title || "", score, total, stars, date: [d.getFullYear(), d.getMonth() + 1, d.getDate()] };
+  if (!old || score / total > old.score / old.total) { all[pk] = rec; store("certs", all); updateCertCount(); return rec; }
+  return old;
+}
+function updateCertCount() { const n = Object.keys(store("certs") || {}).length, el = $("#certN"); if (el) el.textContent = n; }
+
+// Canvas 證書：A4 橫式，1754×1240（150 dpi）
+let certLogo = null;
+function loadCertLogo() {
+  if (certLogo) return certLogo;
+  certLogo = new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = "assets/logo.png"; });
+  return certLogo;
+}
+function paiwanBorder(x, w, h, m, t) {
+  // 排灣族紋飾邊框：菱形（百步蛇背紋）與三角鋸齒，紅、黃、黑、綠
+  const RED = "#B5322A", YEL = "#E8B33A", BLK = "#2B2B2B", GRN = "#3E7D4F";
+  x.fillStyle = BLK; x.fillRect(m, m, w - 2 * m, h - 2 * m);
+  x.fillStyle = "#FBF6EA"; x.fillRect(m + t, m + t, w - 2 * (m + t), h - 2 * (m + t));
+  const band = (len, draw) => { const n = Math.round(len / t), step = len / n; for (let i = 0; i < n; i++) draw(i * step, step, i); };
+  const edge = (ox, oy, len, horiz) => band(len, (p, s, i) => {
+    x.save(); x.translate(horiz ? ox + p : ox, horiz ? oy : oy + p); if (!horiz) { x.translate(t, 0); x.rotate(Math.PI / 2); }
+    x.fillStyle = i % 2 ? RED : YEL;
+    x.beginPath(); x.moveTo(s / 2, t * 0.14); x.lineTo(s - s * 0.12, t / 2); x.lineTo(s / 2, t * 0.86); x.lineTo(s * 0.12, t / 2); x.closePath(); x.fill();
+    x.fillStyle = BLK; x.beginPath(); x.moveTo(s / 2, t * 0.36); x.lineTo(s * 0.64, t / 2); x.lineTo(s / 2, t * 0.64); x.lineTo(s * 0.36, t / 2); x.closePath(); x.fill();
+    x.fillStyle = GRN;
+    [[0, 0, 1], [0, t, -1], [s, 0, 1], [s, t, -1]].forEach(([cx, cy, d]) => { x.beginPath(); x.moveTo(cx, cy); x.lineTo(cx + (cx ? -1 : 1) * s * 0.22, cy); x.lineTo(cx, cy + d * t * 0.3); x.closePath(); x.fill(); });
+    x.restore();
+  });
+  edge(m, m, w - 2 * m, true); edge(m, h - m - t, w - 2 * m, true);
+  edge(m, m + t, h - 2 * (m + t), false); edge(w - m - t, m + t, h - 2 * (m + t), false);
+  x.fillStyle = BLK; [[m, m], [w - m - t, m], [m, h - m - t], [w - m - t, h - m - t]].forEach(([a, b]) => x.fillRect(a, b, t, t));
+  x.fillStyle = YEL; [[m, m], [w - m - t, m], [m, h - m - t], [w - m - t, h - m - t]].forEach(([a, b]) => { x.beginPath(); x.arc(a + t / 2, b + t / 2, t * 0.22, 0, 7); x.fill(); });
+  x.strokeStyle = "#C9A24A"; x.lineWidth = 3; x.strokeRect(m + t + 18, m + t + 18, w - 2 * (m + t + 18), h - 2 * (m + t + 18));
+}
+async function drawCert(rec, who) {
+  const W = 1754, H = 1240, c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d"), C = certCourse(rec);
+  const DISP = '"LXGW WenKai TC", "Noto Serif TC", serif', SERIF = '"Noto Serif TC", serif';
+  const roc = rec.date[0] - 1911, dateTxt = "中華民國 " + roc + " 年 " + rec.date[1] + " 月 " + rec.date[2] + " 日";
+  const nameTxt = who.name || "", seatTxt = who.seat ? C.grade + "　" + who.seat + " 號" : C.grade;
+  const allText = "學習證書嘉蘭樂學島國小同學完成了的並在挑戰關卡中答對題獲得顆星特頒此證以資鼓勵．「」，。、" + nameTxt + seatTxt + C.subject + C.lesson + dateTxt + "0123456789";
+  try { await Promise.all([document.fonts.load("700 80px \"LXGW WenKai TC\"", allText), document.fonts.load("700 40px \"Noto Serif TC\"", allText)]); } catch (e) {}
+  const logo = await loadCertLogo();
+
+  x.fillStyle = "#FBF6EA"; x.fillRect(0, 0, W, H);
+  paiwanBorder(x, W, H, 36, 44);
+  // 淡淡的海浪與山形浮水印（只畫在邊框內）
+  x.save(); x.beginPath(); x.rect(80, 80, W - 160, H - 160); x.clip(); x.globalAlpha = 0.07; x.fillStyle = "#1F6FB2";
+  for (let k = 0; k < 3; k++) { x.beginPath(); x.moveTo(0, H); for (let i = 0; i <= 40; i++) x.lineTo(i / 40 * W, H - 150 - k * 46 + Math.sin(i * 0.9 + k) * 16); x.lineTo(W, H); x.closePath(); x.fill(); }
+  x.fillStyle = "#3E7D4F"; x.beginPath(); x.moveTo(W * 0.52, H); x.lineTo(W * 0.72, H * 0.6); x.lineTo(W * 0.8, H * 0.68); x.lineTo(W * 0.9, H * 0.55); x.lineTo(W, H * 0.66); x.lineTo(W, H); x.closePath(); x.fill();
+  x.restore();
+  x.strokeStyle = "#C9A24A"; x.lineWidth = 3; x.strokeRect(98, 98, W - 196, H - 196);
+
+  x.textAlign = "center"; x.textBaseline = "alphabetic";
+  if (logo) x.drawImage(logo, W / 2 - 70, 132, 140, 140);
+  x.fillStyle = "#1F4E4A"; x.font = "700 40px " + SERIF; x.fillText("嘉 蘭 樂 學 島", W / 2, 322);
+  x.fillStyle = "#8E2A22"; x.font = "700 112px " + DISP; x.fillText("學 習 證 書", W / 2, 452);
+  x.strokeStyle = "#C9A24A"; x.lineWidth = 3; x.beginPath(); x.moveTo(W / 2 - 300, 490); x.lineTo(W / 2 + 300, 490); x.stroke();
+  x.fillStyle = "#C9A24A"; x.beginPath(); x.moveTo(W / 2, 478); x.lineTo(W / 2 + 12, 490); x.lineTo(W / 2, 502); x.lineTo(W / 2 - 12, 490); x.closePath(); x.fill();
+
+  x.fillStyle = "#2B2B2B"; x.font = "400 44px " + DISP; x.fillText(seatTxt, W / 2, 588);
+  x.font = "700 96px " + DISP; x.fillStyle = "#1F2A28"; x.fillText(nameTxt + "  同學", W / 2, 700);
+  const nw = Math.max(320, x.measureText(nameTxt + "  同學").width + 60);
+  x.strokeStyle = "#B9A27A"; x.lineWidth = 2; x.beginPath(); x.moveTo(W / 2 - nw / 2, 724); x.lineTo(W / 2 + nw / 2, 724); x.stroke();
+
+  x.font = "400 46px " + DISP; x.fillStyle = "#333";
+  x.fillText("完成了「" + C.grade + C.subject + "．" + C.lesson + "」的學習，", W / 2, 812);
+  const stars = "★".repeat(rec.stars) + "☆".repeat(3 - rec.stars);
+  const l2a = "並在挑戰關卡中答對 " + rec.score + " / " + rec.total + " 題，獲得 ", l2b = stars, l2c = "。";
+  const wa = x.measureText(l2a).width, wc = x.measureText(l2c).width;
+  x.font = "400 50px " + SERIF; const wb = x.measureText(l2b).width;
+  let sx = W / 2 - (wa + wb + wc) / 2; x.textAlign = "left";
+  x.font = "400 46px " + DISP; x.fillText(l2a, sx, 884); sx += wa;
+  x.font = "400 50px " + SERIF; x.fillStyle = "#E0A21B"; x.fillText(l2b, sx, 886); sx += wb;
+  x.font = "400 46px " + DISP; x.fillStyle = "#333"; x.fillText(l2c, sx, 884);
+  x.textAlign = "center"; x.fillText("特頒此證，以資鼓勵。", W / 2, 956);
+
+  x.textAlign = "left"; x.font = "400 38px " + DISP; x.fillStyle = "#555"; x.fillText(dateTxt, 210, 1086);
+  // 樂學島章（紀念章，非公文印信）
+  x.save(); x.translate(W - 330, 1030); x.rotate(-0.12);
+  x.strokeStyle = "#C2362C"; x.fillStyle = "#C2362C"; x.lineWidth = 7; x.globalAlpha = 0.88;
+  x.beginPath(); x.arc(0, 0, 92, 0, 7); x.stroke(); x.lineWidth = 2.5; x.beginPath(); x.arc(0, 0, 80, 0, 7); x.stroke();
+  x.textAlign = "center"; x.font = "700 40px " + SERIF; x.fillText("嘉蘭", 0, -14); x.fillText("樂學島", 0, 36);
+  x.font = "700 17px " + SERIF; x.fillText("學習紀念章", 0, 60);
+  x.restore();
+  return c;
+}
+function certFileName(rec, who) { const C = certCourse(rec); return "嘉蘭樂學島證書_" + C.grade + C.subject + "_" + (C.no || rec.title) + (who.name ? "_" + who.name : "") + ".png"; }
+function certView(host, rec, back) {
+  const who = store("certWho") || { name: "", seat: "" }, C = certCourse(rec);
+  host.innerHTML = '<div class="cert-box">' +
+    '<h2>🎓 領取學習證書</h2><p class="cert-sub">' + esc(C.grade + C.subject + "．" + C.lesson) + '</p>' +
+    '<div class="cert-form"><label>姓名<input id="certName" maxlength="12" autocomplete="off" placeholder="寫上你的名字" value="' + esc(who.name) + '"></label>' +
+    '<label class="seat">座號<input id="certSeat" inputmode="numeric" maxlength="3" placeholder="可不填" value="' + esc(who.seat) + '"></label></div>' +
+    '<div class="cert-prev"><img id="certImg" alt="學習證書預覽"><span class="cert-wait">證書製作中…</span></div>' +
+    '<div class="row cert-actions"><button class="btn" id="certDl">⬇ 下載圖片</button><button class="btn ghost" id="certPrint">🖨 列印／存成 PDF</button>' + (back ? '<button class="btn ghost" id="certBack">返回</button>' : "") + '</div>' +
+    '<p class="cert-note">證書和紀錄只存在這台裝置的瀏覽器裡，清除瀏覽資料就會消失，記得先下載保存。名字不會上傳到網路。</p></div>';
+  let canvas = null, timer = null, seq = 0;
+  const render = async () => {
+    const my = ++seq, w = { name: $("#certName").value.trim(), seat: $("#certSeat").value.replace(/\D/g, "") };
+    store("certWho", w);
+    const cv = await drawCert(rec, w); if (my !== seq || !$("#certImg")) return;
+    canvas = cv; $("#certImg").src = cv.toDataURL("image/png"); host.querySelector(".cert-prev").classList.add("ready");
+    const ok = !!w.name; $("#certDl").disabled = !ok; $("#certPrint").disabled = !ok;
+  };
+  ["certName", "certSeat"].forEach(id => $("#" + id).addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(render, 250); }));
+  $("#certDl").addEventListener("click", () => {
+    if (!canvas) return;
+    canvas.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = certFileName(rec, { name: $("#certName").value.trim() }); document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }, "image/png");
+    speak("證書下載好了，恭喜你！");
+  });
+  $("#certPrint").addEventListener("click", () => {
+    if (!canvas) return;
+    let pa = $("#printArea"); if (!pa) { pa = document.createElement("div"); pa.id = "printArea"; document.body.appendChild(pa); }
+    pa.innerHTML = '<img alt="" src="' + canvas.toDataURL("image/png") + '">';
+    document.body.classList.add("printing");
+    const done = () => { document.body.classList.remove("printing"); removeEventListener("afterprint", done); };
+    addEventListener("afterprint", done); setTimeout(() => window.print(), 120);
+  });
+  if (back) $("#certBack").addEventListener("click", back);
+  render();
+  if (!who.name) setTimeout(() => { const i = $("#certName"); if (i) i.focus(); }, 200);
+}
+function openCerts() {
+  modalBack = "home";
+  const all = store("certs") || {}, list = Object.values(all).sort((a, b) => a.g - b.g || a.key.localeCompare(b.key) || a.pk.localeCompare(b.pk));
+  openModal('<div class="m-head"><h1>🎓 我的證書</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<div id="certHost"><p class="p-lede">每一課的「挑戰關卡」答對 7 成以上（2 顆星），就能領取一張學習證書。</p>' +
+    (list.length ? '<div class="cert-list">' + list.map(r => { const C = certCourse(r), s = subjectOf(r.key); return '<button class="cert-item" data-pk="' + esc(r.pk) + '" style="--s:' + (s ? s.color : "#1F6FB2") + '"><b>' + esc(C.grade + C.subject) + '</b><span>' + esc(C.lesson) + '</span><em>' + "★".repeat(r.stars) + '<i>' + "★".repeat(3 - r.stars) + '</i>　' + r.date[1] + "/" + r.date[2] + '</em></button>'; }).join("") + '</div>'
+      : '<div class="cert-empty">還沒有證書喔！<br>到「六年級 → 國語」完成一課的挑戰關卡，就能拿到第一張。<br><button class="btn" data-go="g6-chinese">去六年級國語館</button></div>') + '</div>', "list");
+  $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
+  $all("#modal .cert-item").forEach(b => b.addEventListener("click", () => certView($("#certHost"), all[b.getAttribute("data-pk")], openCerts)));
+}
+
 function openList() {
   modalBack = "home";
-  openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p>' +
+  openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
     GRADES.map(g => '<section class="list-isl" style="--g:' + g.color + '"><h2><i class="dot" style="background:' + g.color + '"></i>' + g.name + '學習島</h2><div class="chips">' + SUBJECTS.map(s => {
       const open = isOpen(g.n, s.key);
       return '<button class="chipbtn ' + (open ? "open" : "") + '" data-go="g' + g.n + '-' + s.key + '" style="--s:' + s.color + '">' + s.name + (open ? "" : "<small>建造中</small>") + '</button>';
@@ -2556,6 +2702,7 @@ function route() {
   let m;
   if (h === "teacher") { openTeacher(); return; }
   if (h === "list") { openList(); return; }
+  if (h === "certs") { openCerts(); return; }
   if (h === "guide") { openGuide(); return; }
   if (h === "info") { openInfo(); return; }
   closeModal();
@@ -2851,7 +2998,7 @@ function start() {
     '<aside id="panel" class="panel-card" hidden></aside>' +
     '<button id="panelTab" class="panel-tab" type="button" aria-controls="panel" aria-expanded="true" title="收合卡片"><span class="pt-arrow" aria-hidden="true">›</span><span class="pt-label"></span></button>' +
     '<footer class="bar bar-bottom">' +
-      '<div class="foot-l"><span class="foot-ic">' + ico("book") + '</span><div class="foot-txt"><small>我的探索足跡</small><b><span id="footN">0</span><em> / <span id="footT">60</span></em></b></div><div class="foot-bar"><i id="footBar"></i></div>' +
+      '<div class="foot-l"><span class="foot-ic">' + ico("book") + '</span><div class="foot-txt"><small>我的探索足跡</small><b><span id="footN">0</span><em> / <span id="footT">60</span></em></b></div><div class="foot-bar"><i id="footBar"></i></div><button class="foot-cert" id="certBtn" type="button" title="我的證書" aria-label="我的證書">🎓<b id="certN">0</b></button>' +
         '<div class="foot-txt magpie"><small>台灣藍鵲</small><b id="birdCount">0 / 10</b></div></div>' +
       '<nav class="tools" aria-label="地圖工具">' +
         '<button class="tool wide vbtn on" data-view="pano">' + ico("home") + '<span>全景</span></button>' +
@@ -2873,6 +3020,7 @@ function start() {
   $("#heroQuote").addEventListener("click", () => setQuote(++quoteIdx));
   $all("#gradeSeg button").forEach(b => b.addEventListener("click", () => { stopTour(); const n = +b.getAttribute("data-g"); if (!n) { ui.view = "pano"; focus.flyKey = ""; } go(n ? "g" + n : "home"); }));
   $("#listBtn").addEventListener("click", () => go("list"));
+  $("#certBtn").addEventListener("click", () => go("certs")); updateCertCount();
   $("#guideBtn").addEventListener("click", () => go("guide"));
   $("#panelTab").addEventListener("click", () => setPanelMin(!panelMin()));
   try { if (localStorage.getItem("jialan:panelMin") === "1") setPanelMin(true, false); } catch (e) {}
