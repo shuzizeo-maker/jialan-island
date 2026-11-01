@@ -2141,7 +2141,8 @@ function panelHub(quiet) {
     '<h2>嘉蘭國小</h2><p class="p-lede">歡迎來到嘉蘭樂學島！這裡是我們的學校：後山下的白磁磚教室和紅色祖靈柱、灰色的幼兒園新大樓、「追求真善美的」彩繪牆，還有紅土跑道和大草地。六座年級島用吊橋和嘉蘭國小相連，相鄰的年級島之間也有吊橋，可以一島接一島走一圈。</p>' +
     '<div class="row"><button class="say" data-say="歡迎來到嘉蘭樂學島！這裡是入口島，六座年級島用吊橋連在一起，相鄰的島也互相連通。點一座小島開始探險。">' + ICON_SPEAK + '聽一聽</button></div>' +
     '<div class="grade-list">' + GRADES.map(g => '<button class="gbtn" data-go="g' + g.n + '" style="--g:' + g.color + '"><span class="num">' + "一二三四五六"[g.n - 1] + '</span>' + g.name + '學習島</button>').join("") + '</div>' +
-    '<div class="p-sec"><b>老師</b><p>投影或列印各島的 QR Code，學生掃描就能直接進入。</p><button class="btn" data-go="teacher">老師專區</button></div>');
+    '<div class="p-sec"><b>老師</b><p>投影或列印各島的 QR Code，學生掃描就能直接進入。</p><button class="btn" data-go="teacher">老師專區</button></div>' +
+    '<p class="copy-note sm">©　島上教材取材自翰林、南一、康軒等出版社，著作權屬各出版社所有，僅供教師教學及學生學習使用。<a href="#copyright">版權聲明</a></p>');
   if (!quiet) speak("嘉蘭國小，歡迎來到嘉蘭樂學島");
 }
 function panelIsland(n) {
@@ -2154,8 +2155,29 @@ function panelIsland(n) {
       return '<button class="sbtn ' + (open ? "open" : "") + '" data-go="g' + n + '-' + s.key + '" style="--s:' + s.color + '"><i></i><b>' + s.name + '</b><small>' + (open ? "開放中" : "建造中") + '</small></button>';
     }).join("") + '</div>', "island");
 }
+/* ---------- 版權標示：教材著作權屬出版社，僅供教師教學及學生學習使用 ---------- */
+const PUBLISHERS = { "翰林": "翰林出版事業股份有限公司", "南一": "南一書局企業股份有限公司", "康軒": "康軒文教事業股份有限公司" };
+function pubFull(p) { const k = Object.keys(PUBLISHERS).find(x => (p || "").indexOf(x) >= 0); return k ? { short: k, full: PUBLISHERS[k] } : null; }
+function copyrightLine(b, html, word = "本課") {
+  const p = pubFull(b && b.publisher);
+  const txt = p ? word + "內容取材自" + p.short + "版教材，著作權屬" + p.full + "所有，僅供教師教學及學生學習使用，請勿轉載或作商業用途。"
+    : /自編/.test((b && b.publisher) || "") ? word + "為嘉蘭國小教師自編教材，僅供教師教學及學生學習使用。"
+    : word + "教材著作權屬原出版者所有，僅供教師教學及學生學習使用，請勿轉載或作商業用途。";
+  return html ? '<p class="copy-note">©　' + esc(txt) + ' <a href="#copyright">版權聲明</a></p>' : txt;
+}
+function openCopyright() {
+  modalBack = "home";
+  const pubs = Object.keys(PUBLISHERS).map(k => "<li><b>" + k + "版</b>：" + PUBLISHERS[k] + "</li>").join("");
+  openModal('<div class="m-head"><h1 class="serif">版權聲明</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<section class="t-sec"><h2>教材內容</h2><p>嘉蘭樂學島上的課文、生字語詞、學習重點與部分練習題，取材自下列出版社的國民小學教材，<b>著作權仍屬各出版社所有</b>：</p><ul class="copy-list">' + pubs + '</ul>' +
+      '<p>經出版社同意，本網站內容<b>僅供教師教學及學生學習使用</b>。請勿轉載、重製、散布，或作任何商業用途。網站不提供教科書與習作的完整檔案。</p></section>' +
+    '<section class="t-sec"><h2>網站原創內容</h2><p>3D 學習群島場景、介面設計、程式、音樂與教師自編教材：© 臺東縣金峰鄉嘉蘭國民小學。</p>' +
+      '<p class="small">島報中的新聞標題與連結屬各媒體所有，點選後連到原網站閱讀。網站使用的開放原始碼與字型：three.js（MIT 授權）、霞鶩文楷 LXGW WenKai TC 與 Noto Sans／Serif TC（SIL Open Font License）。</p></section>' +
+    '<section class="t-sec"><h2>聯絡我們</h2><p>權利人若認為網站內容有任何疑慮，請與我們聯絡，我們會儘速處理。</p><p>嘉蘭國民小學　964 臺東縣金峰鄉嘉蘭村 3 鄰 132 號　電話 089-751224</p></section>', "info-sheet");
+}
 function bookBody(b) {
   const head = '<p class="p-meta">' + esc([pubName(b.publisher), b.volume].filter(Boolean).join("．") || "學習內容") + (b.live ? "" : '<span class="draft">未上線</span>') + (previewMode && b.teacher ? "．負責：" + esc(b.teacher) : "") + '</p>';
+  const tail = '<p class="copy-note sm">©　' + esc(copyrightLine(b, false, "本冊")) + ' <a href="#copyright">版權聲明</a></p>';
   if (b.error) return head + '<div class="building-msg">' + esc(b.error) + '</div>';
   if (!b.data) return head + '<div class="loading">讀取中…</div>';
   const d = b.data;
@@ -2164,7 +2186,7 @@ function bookBody(b) {
     const open = (it.live || previewMode) && d.lessons[it.id], k = lessonHash(b, it.id);
     return open ? '<button class="lesson open" data-go="' + k + '"><span class="no">' + esc(it.no) + '</span><span class="tt"><b>' + esc(it.title) + '</b><small>' + esc([it.genre, it.author].filter(Boolean).join("．")) + (it.live ? "" : "．未上線") + '</small></span>' + starsOf(k) + '</button>'
       : '<div class="lesson"><span class="no">' + esc(it.no) + '</span><span class="tt"><b>' + esc(it.title) + '</b><small>即將開放</small></span></div>';
-  }).join("") + '</div>').join("");
+  }).join("") + '</div>').join("") + tail;
 }
 function panelSubject(n, key, quiet) {
   const g = GRADES[n - 1], s = subjectOf(key), i = SUBJECTS.indexOf(s), books = booksOf(n, key);
@@ -2208,7 +2230,7 @@ function openLesson(n, key, bn, id) {
   openModal('<div style="--s:' + sub.color + '"><header class="lesson-hero' + (night ? " night" : "") + '"><button class="m-close" aria-label="關閉">×</button><div class="unitname">' + esc(g.name + sub.name + "．" + L.unit) + '</div><h1>' + esc((L.no ? L.no + "　" : "") + L.title) + '</h1>' +
     '<div class="meta">' + [L.genre, L.author ? "作者：" + L.author : "", pubName(b.publisher), item.live ? "" : "未上線預覽"].filter(Boolean).map(x => '<span class="chip">' + esc(x) + '</span>').join("") + '</div></header>' +
     '<div class="tabs" role="tablist">' + TABS.map((t, i) => '<button class="tab" role="tab" data-tab="' + t[0] + '" aria-selected="' + (i ? "false" : "true") + '">' + t[1] + '</button>').join("") + '</div>' +
-    '<section class="lpanel" id="lpanel" role="tabpanel"></section></div>', "lesson-sheet");
+    '<section class="lpanel" id="lpanel" role="tabpanel"></section>' + copyrightLine(b, true) + '</div>', "lesson-sheet");
   const panel = $("#lpanel"), FN = { intro: tabIntro, text: tabText, chars: tabChars, words: tabWords, key: tabKey, think: tabThink, quiz: tabQuiz };
   function show(tab) {
     stopSpeak();
@@ -2468,6 +2490,7 @@ function openTeacher() {
   }).join("");
   const tt = teacherTools();
   openModal('<div class="m-head"><h1>老師專區</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<section class="t-sec"><h2>© 版權提醒</h2><p class="small">出版社同意教材供教師教學及學生學習使用，但著作權仍屬出版社。製作教材時請：① 在總表「建物登記」填好「版本」（翰林／南一／康軒／自編），網站會自動在每一課加上版權標示；② 只整理重點、生字和自編題目，不要上傳課本或習作的整份掃描檔。<a href="#copyright">看版權聲明</a></p></section>' +
     '<section class="t-sec"><h2>🗂 行政工具</h2><p class="small">只放在老師專區，學生在島上看不到。要新增工具，在總表的「工具登記」分頁加一列，「對象」選「老師」就好。</p>' +
     (tt.length ? '<div class="tool-list">' + tt.map(t => toolCard(t)).join("") + '</div>' : '<p class="small">目前還沒有登記行政工具。</p>') + '</section>' +
     '<section class="t-sec"><h2>預覽模式</h2><p class="small">打開後，總表或課次「上線」選「否」的內容也會顯示，方便上線前檢查。只影響這台裝置，關掉分頁就恢復。</p>' +
@@ -3547,7 +3570,7 @@ function openInfo() {
       '<div class="row" style="margin-top:10px"><b class="small" style="min-width:3em">節慶</b>' + (() => { const st = festState(twNow()), list = [...festInstances(st.t.y), ...festInstances(st.t.y + 1)].filter(e => e.end >= st.today).sort((a, b) => a.start - b.start).slice(0, 4); return list.map(e => { const d = new Date(e.day * 864e5); return '<button class="pill" data-pvf="' + d.getUTCFullYear() + "-" + (d.getUTCMonth() + 1) + "-" + d.getUTCDate() + ' 10:30">' + e.f.icon + e.f.name + '活動</button>'; }).join(""); })() + '</div>' +
       '<div class="row" style="margin-top:10px"><button class="btn" id="pvGo">預覽</button><button class="btn ghost" id="pvReset">回到現在</button></div></section>' +
     '<section class="t-sec"><h2>老師</h2><p class="small">QR Code、預覽模式、教材試算表連線檢查都在老師專區。</p><button class="btn" data-go2="teacher">老師專區</button></section>' +
-    '<p class="small">嘉蘭樂學島．臺東縣金峰鄉嘉蘭國小｜教材內容整理自出版社教科書，僅供教學使用。</p>', "info-sheet");
+    '<p class="small">嘉蘭樂學島．臺東縣金峰鄉嘉蘭國小｜教材內容取材自翰林、南一、康軒等出版社，著作權屬各出版社所有，僅供教師教學及學生學習使用。<a href="#copyright">版權聲明</a></p>', "info-sheet");
   $("#optNames").addEventListener("click", () => { ui.names = !ui.names; openInfo(); });
   $all("[data-wx]").forEach(b => b.addEventListener("click", () => { wxOverride = b.getAttribute("data-wx") || null; applyTime(); openInfo(); toast("天氣：" + (wxOverride ? WX_NAME[wxOverride] : "即時天氣")); }));
   $all("[data-spawn]").forEach(b => b.addEventListener("click", () => {
@@ -3601,6 +3624,7 @@ function route() {
   let m;
   if (h === "teacher") { openTeacher(); return; }
   if (h === "list") { openList(); return; }
+  if (h === "copyright") { openCopyright(); return; }
   if (h === "certs") { openCerts(); return; }
   if (h === "guide") { openGuide(); return; }
   if (h === "info") { openInfo(); return; }
@@ -3896,7 +3920,7 @@ function start() {
     '<button class="hchip guide-btn" id="guideBtn">' + ico("book") + '上島探索指南</button>' +
     '<button class="hchip host-btn" id="hostBtn" aria-label="問問島主">🙋 問島主</button>' +
     '<p class="tagline">✦　每一座島，都在等你發現</p>' +
-    '<div class="hchip stat">' + ico("anchor") + '嘉蘭群島<span class="sep"></span>6 學習島・60 學習館・開放 <b id="statOpen">0</b> 館</div>' +
+    '<div class="hchip stat">' + ico("anchor") + '嘉蘭群島<span class="sep"></span>6 學習島・60 學習館・開放 <b id="statOpen">0</b> 館<span class="sep"></span><a class="copy-link" href="#copyright">© 版權聲明</a></div>' +
     '<aside id="panel" class="panel-card" hidden></aside>' +
     '<button id="panelTab" class="panel-tab" type="button" aria-controls="panel" aria-expanded="true" title="收合卡片"><span class="pt-arrow" aria-hidden="true">›</span><span class="pt-label"></span></button>' +
     '<footer class="bar bar-bottom">' +

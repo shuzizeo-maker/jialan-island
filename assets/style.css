@@ -669,3 +669,10 @@ pre.code { background: #1F2A28; color: #E9F2E6; padding: 10px 12px; border-radiu
 .icon-btn.teacher-btn svg { width: 18px; height: 18px; }
 @media (max-width: 1240px) { .icon-btn.teacher-btn span { display: none; } .icon-btn.teacher-btn { padding: 0; width: 42px; justify-content: center; } }
 .tool.on#fullBtn { background: var(--pacific); color: #fff; }
+
+/* ---------- 版權標示 ---------- */
+.copy-note { margin: 14px 2px 2px; font-size: .78rem; line-height: 1.6; color: var(--ink-soft); border-top: 1px dashed var(--line); padding-top: 10px; }
+.copy-note.sm { font-size: .74rem; margin-top: 12px; }
+.copy-note a, .copy-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.copy-link { pointer-events: auto; cursor: pointer; }
+.copy-list { margin: 6px 0 10px; padding-left: 1.3em; line-height: 1.9; }
