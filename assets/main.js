@@ -1918,7 +1918,9 @@ function addLabel(obj, offY, kind, data, onClick) {
   const L = { el, obj, offY, kind, data, mode: null }; labels.push(L); return L;
 }
 function labelMode(L) {
-  if (L.kind === "npc") return (L.data.type === "host" ? focus.g === 0 : focus.g === L.data.g) ? "fixed" : "hide";
+  if (L.kind === "npc") return (L.data.type === "host" ? focus.g === 0 : (focus.g === L.data.g && !FEST.npc)) ? "fixed" : "hide";
+  if (L.kind === "fest") return (focus.g === 0 || focus.g === null) ? "fixed" : "hide";
+  if (L.kind === "tool") return (focus.g === 7 || (focus.g === 0 && camera.position.distanceTo(HARBOR_POS) < 40)) ? "fixed" : "hide";
   if (L.kind !== "bld") return "fixed";
   if (focus.g === 0 || (focus.g && focus.g !== L.data.g)) return isOpen(L.data.g, L.data.key) ? "dot" : "hide";
   if (focus.g === L.data.g || camera.position.distanceTo(controls.target) < 70) return "full";
@@ -1943,6 +1945,14 @@ function renderLabel(L, mode) {
     if (s) L.el.style.setProperty("--s", s.color);
     L.el.setAttribute("aria-label", host ? "島主" + d.name + "，點我問問題" : d.name + "，" + GRADES[d.g - 1].name + s.name + "助教");
     L.el.innerHTML = host ? '<i>主</i><span>島主．' + esc(d.name) + '</span>' : '<i>' + esc(s.name[0]) + '</i><span>' + esc(d.name) + '</span>';
+  } else if (L.kind === "tool") {
+    const t = d.t; L.el.className = "lbl bld full" + (t.url ? " open" : ""); L.el.style.setProperty("--s", d.color);
+    L.el.setAttribute("aria-label", t.name + (t.url ? "" : "，建造中"));
+    L.el.innerHTML = '<i>' + esc(t.icon) + '</i><span>' + esc(t.name) + '</span>' + (t.url ? "" : "<small>建造中</small>");
+  } else if (L.kind === "fest") {
+    const f = d.e.f; L.el.className = "lbl fest"; L.el.style.setProperty("--s", f.col[0]);
+    L.el.setAttribute("aria-label", f.title + "，點我看活動");
+    L.el.innerHTML = '<i>' + f.icon + '</i><span>' + esc(f.title) + '</span>';
   } else if (L.kind === "lock") {
     L.el.innerHTML = '<span class="lk">' + ICON_LOCK + '</span>' + d.name + '<small>尚未開放</small>';
   } else L.el.innerHTML = d.name;
@@ -1952,7 +1962,7 @@ function updateLabels() {
   const W = innerWidth, H = innerHeight;
   labels.forEach(L => {
     const m = labelMode(L); if (m !== L.mode) renderLabel(L, m);
-    let show = (ui.names || L.kind === "bld" || L.kind === "npc") && L.mode !== "hide";
+    let show = (ui.names || L.kind === "bld" || L.kind === "npc" || L.kind === "fest" || L.kind === "tool") && L.mode !== "hide";
     if (L.kind === "grade" && L.data.g && focus.g === L.data.g && focus.key) show = false;
     if (!show) { L.el.style.visibility = "hidden"; return; }
     L.obj.getWorldPosition(_v); _v.y += L.offY; _v.project(camera);
@@ -1985,7 +1995,7 @@ function pickAt(cx, cy) {
   ray.setFromCamera(ptr, camera);
   const hits = ray.intersectObjects(pickables, false);
   if (!hits.length) return null;
-  const pri = ["npc", "host", "bird", "mascot", "building"];
+  const pri = ["npc", "host", "tool", "bird", "mascot", "building"];
   for (const t of pri) { const h = hits.find(x => x.object.userData.type === t); if (h) return h.object.userData; }
   return hits[0].object.userData;
 }
@@ -1993,6 +2003,8 @@ function onPick(u) {
   if (!u) return;
   stopTour();
   if (u.type === "npc" || u.type === "host") return openNPC(u);
+  if (u.type === "tool") return u.i >= 0 ? openTool(u.i) : go("tools");
+  if (u.type === "tools") return go("tools");
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2034,7 +2046,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2093,7 +2105,7 @@ function initWorld() {
     clouds.forEach(c => { c.obj.visible = ui.fx; });
     if (!ui.paused) stepAmbient(dt, time);
     stepParticles(dt, time);
-    stepNPC(dt, time); stepLamp(dt);
+    stepFest(dt); stepNPC(dt, time); stepLamp(dt);
     renderer.render(scene, camera);
     updateLabels();
   });
@@ -2411,7 +2423,35 @@ function qrSVG(text) {
   if (typeof window.qrcode !== "function") return '<div class="qr-miss">QR Code 工具載入中</div>';
   const q = window.qrcode(0, "M"); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
 }
+/* ---------- 老師專區通關密語（防止學生好奇點進來；真正的權限由各工具自己用 Google 帳號把關） ---------- */
+const TEACHER_DEFAULT_HASH = "5ae72af209075028f10bae2400787067b0560cd3a578c4e8ea8d1642204ce7bf";   // 預設通關密語：jles964（請在老師專區更換）
+const teacherHash = () => (CFG.teacherPassHash || TEACHER_DEFAULT_HASH).toLowerCase();
+async function passHash(p) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("jialan-teacher:" + p.trim()));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function teacherUnlocked() {
+  let v = null; try { v = sessionStorage.getItem("jialan:teacherOK") || localStorage.getItem("jialan:teacherOK"); } catch (e) {}
+  return v === teacherHash();
+}
+function openTeacherGate() {
+  modalBack = "home";
+  openModal('<div class="m-head"><h1>老師專區</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<form class="gate" id="gateForm"><p class="p-lede">🔒 這裡是老師使用的地方，請輸入老師通關密語。</p>' +
+    '<input id="gatePass" type="password" autocomplete="current-password" placeholder="通關密語" aria-label="通關密語">' +
+    '<label class="small gate-remember"><input type="checkbox" id="gateRemember"> 記住這台電腦（只在老師自己的電腦勾選）</label>' +
+    '<div class="row"><button class="btn" type="submit">進入老師專區</button></div><p class="small gate-msg" id="gateMsg" aria-live="polite"></p></form>', "teacher");
+  setTimeout(() => { const i = $("#gatePass"); if (i) i.focus({ preventScroll: true }); }, 100);
+  $("#gateForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const h = await passHash($("#gatePass").value || "");
+    if (h !== teacherHash()) { $("#gateMsg").textContent = "通關密語不對，請再試一次。"; $("#gatePass").select(); return; }
+    try { sessionStorage.setItem("jialan:teacherOK", h); if ($("#gateRemember").checked) localStorage.setItem("jialan:teacherOK", h); } catch (er) {}
+    openTeacher();
+  });
+}
 function openTeacher() {
+  if (!teacherUnlocked()) return openTeacherGate();
   modalBack = "home";
   const base = siteBase(), links = [["嘉蘭樂學島首頁", "home"]];
   GRADES.forEach(g => links.push([g.name + "學習島", "g" + g.n]));
@@ -2426,13 +2466,26 @@ function openTeacher() {
     const b = r._book, st = r._why ? '<span class="st bad">' + esc(r._why) + '</span>' : b.error ? '<span class="st bad">' + esc(b.error) + '</span>' : b.data ? '<span class="st ok">讀取成功：' + b.data.units.reduce((a, u) => a + u.items.length, 0) + ' 課</span>' : '<span class="st">尚未檢查</span>';
     return '<tr><td>' + esc(TXT(r["年級"]) + TXT(r["科目"])) + '</td><td>' + esc(TXT(r["冊別"])) + '</td><td>' + esc(TXT(r["負責老師"])) + '</td><td>' + (TXT(r["上線"]) === "是" ? "是" : "否") + '</td><td>' + st + '</td><td>' + (b ? '<button class="pill" data-check="' + i + '">檢查</button>' : "") + '</td></tr>';
   }).join("");
+  const tt = teacherTools();
   openModal('<div class="m-head"><h1>老師專區</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<section class="t-sec"><h2>🗂 行政工具</h2><p class="small">只放在老師專區，學生在島上看不到。要新增工具，在總表的「工具登記」分頁加一列，「對象」選「老師」就好。</p>' +
+    (tt.length ? '<div class="tool-list">' + tt.map(t => toolCard(t)).join("") + '</div>' : '<p class="small">目前還沒有登記行政工具。</p>') + '</section>' +
     '<section class="t-sec"><h2>預覽模式</h2><p class="small">打開後，總表或課次「上線」選「否」的內容也會顯示，方便上線前檢查。只影響這台裝置，關掉分頁就恢復。</p>' +
     '<button class="btn' + (previewMode ? "" : " ghost") + '" id="pvMode">' + (previewMode ? "預覽模式：開啟中（點一下關閉）" : "開啟預覽模式") + '</button></section>' +
     '<section class="t-sec"><h2>教材試算表連線檢查</h2><p class="small">' + esc(regMsg) + '</p>' +
     (rows ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>年級科目</th><th>冊別</th><th>負責老師</th><th>上線</th><th>狀態</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' : "") + '</section>' +
     '<section class="t-sec"><h2>QR Code</h2><p class="small">把 QR Code 投影或印出來，學生用平板掃描就能直接進入。目前網址：<code>' + esc(base) + '</code>（請在正式網址打開這一頁，QR Code 才會指向正式網站）</p>' +
-    '<div class="qr-grid">' + links.map(l => '<div class="qr-card"><div class="qr">' + qrSVG(base + "#" + l[1]) + '</div><b>' + esc(l[0]) + '</b><code>#' + l[1] + '</code></div>').join("") + '</div></section>', "teacher");
+    '<div class="qr-grid">' + links.map(l => '<div class="qr-card"><div class="qr">' + qrSVG(base + "#" + l[1]) + '</div><b>' + esc(l[0]) + '</b><code>#' + l[1] + '</code></div>').join("") + '</div></section>' +
+    '<section class="t-sec"><h2>🔑 通關密語</h2><p class="small">' + (CFG.teacherPassHash ? "目前使用自訂的通關密語。" : "目前還是預設密語 <b>jles964</b>，建議更換。") + '每學年換老師時，換一組新的密語就好。</p>' +
+      '<div class="form-row"><label for="newPass">新的通關密語<input id="newPass" type="text" autocomplete="off" placeholder="至少 6 個字"></label><button class="btn ghost" id="mkPass" type="button">產生設定</button></div>' +
+      '<div id="passOut" hidden><p class="small">把下面這一行，貼到網站資料夾 <code>assets/config.js</code> 裡、<code>masterSheet</code> 那一行的<b>上面</b>（新的一行），存檔後上傳到 GitHub：</p><pre class="code" id="passLine"></pre><button class="pill" id="copyPass" type="button">複製</button></div>' +
+      '<div class="row" style="margin-top:12px"><button class="btn ghost" id="lockBtn" type="button">鎖上老師專區（這台電腦登出）</button></div></section>', "teacher");
+  $("#mkPass").addEventListener("click", async () => {
+    const v = $("#newPass").value.trim(); if (v.length < 6) { toast("通關密語至少要 6 個字"); return; }
+    $("#passLine").textContent = '  teacherPassHash: "' + await passHash(v) + '",'; $("#passOut").hidden = false;
+  });
+  $("#copyPass").addEventListener("click", () => { try { navigator.clipboard.writeText($("#passLine").textContent.trim()); toast("已複製"); } catch (e) {} });
+  $("#lockBtn").addEventListener("click", () => { try { sessionStorage.removeItem("jialan:teacherOK"); localStorage.removeItem("jialan:teacherOK"); } catch (e) {} toast("老師專區已鎖上"); go("home"); });
   $("#pvMode").addEventListener("click", () => {
     previewMode = !previewMode; try { sessionStorage.setItem("jialan:preview", previewMode ? "1" : "0"); } catch (e) {}
     refreshOpenState(); openTeacher(); toast(previewMode ? "預覽模式已開啟" : "預覽模式已關閉");
@@ -2440,7 +2493,7 @@ function openTeacher() {
   $all("[data-check]").forEach(btn => btn.addEventListener("click", () => {
     const b = registry.rows[+btn.getAttribute("data-check")]._book; b.error = null; b.data = null; b.loading = null;
     btn.textContent = "讀取中…";
-    loadBook(b).catch(e => { b.error = e.message; }).then(() => { if (location.hash === "#teacher") openTeacher(); });
+    loadBook(b).catch(e => { b.error = e.message; }).then(() => { if (location.hash === "#teacher" && teacherUnlocked()) openTeacher(); });
   }));
 }
 /* ===================== 學習證書：每一課測驗 2 顆星（答對 7 成）以上即可領取 ===================== */
@@ -2809,6 +2862,7 @@ function makeNPCs() {
       const ang = (k / SUBJECTS.length) * Math.PI * 2 + Math.random() * 0.3;
       const m = tutorModel(gr.n, s.key, i++);
       const o = addNPC(m, isl.pos.clone().add(new V3(Math.cos(ang) * 4.1, 0.03, Math.sin(ang) * 4.1)), { type: "npc", g: gr.n, key: s.key, name: tutorName(gr.n, s.key) }, 2.0);
+      o.idx = i - 1; o.base = 1.75;
       o.walk = { isl, home: s.key, st: "ring", a: ang, ta: ang, idle: 1 + Math.random() * 4, t: 0, sp: 0.55 + Math.random() * 0.2 };
       pickWalkTarget(o);
       if (Math.random() < 0.65) {   // 一開始就有一半以上在各館小島上散步，避免全擠在主島
@@ -2845,7 +2899,25 @@ function walkPos(o, out) {
 const _np = new V3(), _np2 = new V3();
 function stepNPC(dt, time) {
   npcs.forEach(o => {
-    const g = o.obj, vis = o.data.type === "host" ? (focus.g === 0 || focus.g === null) : focus.g === o.data.g;
+    const g = o.obj;
+    // 節慶活動：所有助教到操場圍圈跳舞，島主站上小舞臺
+    if (FEST.npc && o.data.type === "npc") {
+      if (!(focus.g === 0 || focus.g === null)) return;
+      const n = o.idx, outer = n < 36, k = outer ? n : n - 36, N = outer ? 36 : 24, rx = outer ? 5.0 : 3.3, rz = outer ? 2.25 : 1.45;
+      const a = k / N * Math.PI * 2 + time * (outer ? 0.1 : -0.14);
+      g.scale.setScalar(1.0);
+      g.position.set(TRACK.cx + Math.cos(a) * rx, 0.03 + Math.abs(Math.sin(time * 3.2 + k)) * 0.05, TRACK.cz + Math.sin(a) * rz);
+      g.rotation.y = Math.atan2(TRACK.cx - g.position.x, TRACK.cz - g.position.z);
+      g.userData.arms.forEach((ar, j) => { ar.rotation.z = (j ? 1 : -1) * 0.95; ar.rotation.x = 0; });
+      const L = g.userData.legs, sw = Math.sin(time * 6.4 + k) * 0.35; L[0].rotation.x = sw; L[1].rotation.x = -sw;
+      o.festOn = true; return;
+    }
+    if (o.festOn) { o.festOn = false; g.scale.setScalar(o.base || 1.75); g.userData.arms.forEach(ar => { ar.rotation.z = 0; }); }
+    if (o.data.type === "host") {
+      if (FEST.npc) { g.position.set(TRACK.cx, 0.2, TRACK.cz + 2.95); g.scale.setScalar(1.6); o.hostFest = true; if (o.label) o.label.offY = 2.1; }
+      else if (o.hostFest) { o.hostFest = false; g.position.set(-4.4, 0.06, 8.0); g.scale.setScalar(2.1); if (o.label) o.label.offY = 2.7; }
+    }
+    const vis = o.data.type === "host" ? (focus.g === 0 || focus.g === null) : focus.g === o.data.g;
     if (!vis && !o.wave) return;
     let moving = false, faceCam = true;
     const w = o.walk;
@@ -2877,7 +2949,7 @@ function stepNPC(dt, time) {
     if (o.wave > 0) { o.wave = Math.max(0, o.wave - dt); arm.rotation.z = 2.4 + Math.sin(time * 12) * 0.35; swing(g, time, 0); }
     else if (moving) { arm.rotation.z = 0; swing(g, time * 0.8, 0.45); }
     else { arm.rotation.z = 0; swing(g, time, 0); arm.rotation.x = Math.sin(time * 1.6 + g.userData.ph) * 0.12; }
-    if (!w) g.position.y = 0.06;
+    if (!w) g.position.y = o.hostFest ? 0.2 : 0.06;
   });
 }
 function npcWave(data) { const o = npcs.find(n => n.data.type === data.type && n.data.g === data.g && n.data.key === data.key); if (o) o.wave = 2.2; }
@@ -2927,6 +2999,10 @@ const HOST_FAQ = [
   { q: "助教是誰？", k: ["助教", "npc", "老師", "嘉六國", "名字"], a: "每座學習館旁邊都站著一位助教，名字像「嘉六國」：「嘉」是嘉蘭國小，「六」是六年級，「國」是國語。點他們，就會告訴你這一館的學習方法。" },
   { q: "地圖怎麼移動？", k: ["移動", "轉", "放大", "縮小", "地圖", "迷路", "拖"], a: "一根手指拖曳可以轉動畫面，兩根手指捏合可以放大縮小；電腦上用滑鼠拖曳、滾輪縮放。迷路了就按 🏠 回到全景。" },
   { q: "台灣藍鵲在哪裡？", k: ["藍鵲", "鳥", "找"], a: "島上藏著十隻台灣藍鵲，仔細看看屋頂、樹上和海邊，點到牠就算找到了！左下角會記錄你找到幾隻。" },
+  { q: "最近有什麼活動？", k: ["活動", "節慶", "聖誕", "過年", "春節", "節日", "派對", "操場"], a: "", act: ["看活動節目", "fest"] },
+  { q: "工具港是什麼？", k: ["工具", "小幫手", "考卷", "訂正", "港"], a: "工具港在嘉蘭國小旁邊，走吊橋就能到。學校的學習小幫手（例如考卷訂正小幫手）都停在那裡，點建築物就能打開。", act: ["去工具港", "tools"] },
+  { q: "老師專區在哪裡？", k: ["老師專區", "密語", "qr", "QR", "管理", "預覽"], a: "畫面右上角有一個鎖頭「老師」按鈕，輸入老師通關密語就能進入。QR Code、預覽模式和行政工具都在裡面。", act: ["打開老師專區", "teacher"] },
+  { q: "島報是什麼？", k: ["島報", "報紙", "新聞", "消息", "公告"], a: "每天第一次上島，島主會送來一份「嘉蘭樂學島島報」，有島上的活動、新開放的課和學習新聞。左下角的 📰 可以再看一次。", act: ["打開今日島報", "paper"] },
   { q: "大武山和太平洋？", k: ["大武山", "太平洋", "山", "海", "船", "火車", "飛魚"], a: "大武山和太平洋還沒開放探險，以後會有新的冒險！現在可以先欣賞海上的拼板舟、飛魚，還有山腳下經過的南迴線火車。" }
 ];
 function hostAnswer(text) {
@@ -2947,8 +3023,9 @@ function openHost() {
   const reply = (f, asked) => {
     add("me", esc(asked));
     if (!f) { const a = "這個問題我還不太會回答，試試看下面的問題，或是問問老師喔！"; add("host", "<b>島主" + esc(HOST_NAME) + "</b>" + esc(a)); speak(a); return; }
+    if (!f.a && f.act && f.act[1] === "fest") { const st = festState(), e = st.cur || st.next; f = Object.assign({}, f, { a: e ? "最近的活動是「" + e.f.title + "」，" + festDateText(e) + "白天 9:00～16:00 在嘉蘭國小操場，" + festStatusText(st, e) + "。全島的助教都會到操場集合喔！" : "最近沒有安排活動。" }); }
     const m = add("host", "<b>島主" + esc(HOST_NAME) + "</b>" + esc(f.a) + (f.act ? '<br><button class="btn ghost sm" data-act="' + f.act[1] + '">' + esc(f.act[0]) + ' →</button>' : ""));
-    const b = $("[data-act]", m); if (b) b.addEventListener("click", () => { const v = b.getAttribute("data-act"); if (v === "lamp") { setLamp(true); closeModal(); go(modalBack); } else go(v); });
+    const b = $("[data-act]", m); if (b) b.addEventListener("click", () => { const v = b.getAttribute("data-act"); if (v === "lamp") { setLamp(true); closeModal(); go(modalBack); } else if (v === "fest") openFest(); else if (v === "paper") openPaper(false); else go(v); });
     speak(f.a);
   };
   $all("[data-faq]").forEach(b => b.addEventListener("click", () => { const f = HOST_FAQ[+b.getAttribute("data-faq")]; reply(f, f.q); }));
@@ -3000,13 +3077,374 @@ function lockPageScroll() {
   const fix = () => { [document.scrollingElement, document.documentElement, document.body, $("#app")].forEach(e => { if (e && (e.scrollTop || e.scrollLeft)) { e.scrollTop = 0; e.scrollLeft = 0; } }); };
   addEventListener("scroll", fix, true); addEventListener("resize", fix); fix();
 }
+/* ===================== 節慶活動：全島助教到操場辦活動（白天 9:00–16:00） ===================== */
+const LUNAR = {   // 農曆節日的國曆日期
+  spring: { 2026: [2, 17], 2027: [2, 6], 2028: [1, 26], 2029: [2, 13], 2030: [2, 3], 2031: [1, 23] },
+  lantern: { 2026: [3, 3], 2027: [2, 20], 2028: [2, 9], 2029: [2, 27], 2030: [2, 17], 2031: [2, 6] },
+  dragon: { 2026: [6, 19], 2027: [6, 9], 2028: [5, 28], 2029: [6, 16], 2030: [6, 5], 2031: [6, 24] },
+  moon: { 2026: [9, 25], 2027: [9, 15], 2028: [10, 3], 2029: [9, 22], 2030: [9, 12], 2031: [10, 1] }
+};
+const secondSunday = (y, m) => { const w = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); return [m, 1 + ((7 - w) % 7) + 7]; };
+const FESTS = [
+  { k: "newyear", name: "元旦", title: "新年快樂派對", icon: "🎆", at: y => [1, 1], days: 1, prep: 5, cp: "balloons", col: ["#E2573B", "#F2C14E", "#2F7FC1", "#FFFFFF"],
+    greet: "新年快樂！新的一年，一起在樂學島上學更多、玩更多！",
+    pool: [["新年新希望許願牆", "把今年最想學會的一件事寫在許願牆上。"], ["倒數氣球秀", "大家一起倒數，放出彩色氣球。"], ["今年的學習目標", "和助教一起訂一個小小的學習目標。"], ["新年第一張證書挑戰", "挑一課完成挑戰關卡，拿下今年第一張證書。"], ["新年祝福接力", "用一句話祝福你的同學和家人。"]] },
+  { k: "spring", name: "春節", title: "新春團圓市集", icon: "🧧", at: y => LUNAR.spring[y], from: -1, days: 4, prep: 10, cp: "lanterns", col: ["#C8242B", "#F2C14E", "#C8242B", "#F7E7A6"],
+    greet: "新年快樂！恭喜發財，祝大家學業進步、身體健康！",
+    pool: [["寫春聯", "用毛筆寫下「春」和「福」，貼在家門口。"], ["答題領紅包", "答對助教的小問題，就能拿到紅包貼紙。"], ["舞龍舞獅表演", "鑼鼓喧天，看獅子在操場上跳躍。"], ["剪窗花", "把紅紙摺一摺、剪一剪，變成漂亮的窗花。"], ["年菜介紹", "聽 vuvu 說說家裡過年會準備什麼菜。"]] },
+  { k: "lantern", name: "元宵節", title: "元宵提燈晚會", icon: "🏮", at: y => LUNAR.lantern[y], days: 1, prep: 5, cp: "lanterns", col: ["#E2573B", "#F2C14E", "#C8242B", "#FFFFFF"],
+    greet: "元宵節快樂！一起提燈籠、猜燈謎吧！",
+    pool: [["猜燈謎", "燈籠下掛著謎題，猜對了有小獎品。"], ["提燈籠遊行", "提著自己的燈籠繞操場一圈。"], ["搓湯圓", "紅的、白的湯圓，圓圓滿滿。"], ["做紙燈籠", "用紙和竹籤做一盞自己的燈籠。"]] },
+  { k: "children", name: "兒童節", title: "兒童節闖關嘉年華", icon: "🎈", at: y => [4, 4], days: 1, prep: 7, cp: "balloons", col: ["#F2A9BE", "#8CB6D6", "#F2C14E", "#9CC59A"],
+    greet: "兒童節快樂！今天是屬於你們的日子！",
+    pool: [["闖關遊戲", "完成五個關卡，集滿印章換小禮物。"], ["氣球派對", "把氣球綁滿操場，比賽誰的造型最特別。"], ["童玩體驗", "打陀螺、跳房子、踢毽子，一起玩。"], ["說故事時間", "島主嘉嘉說一個大武山的故事。"], ["學習島尋寶", "在島上找出藏起來的台灣藍鵲。"]] },
+  { k: "mother", name: "母親節", title: "謝謝媽媽感恩會", icon: "💐", at: y => secondSunday(y, 5), days: 1, prep: 7, cp: "balloons", col: ["#E07B9B", "#F7C8D4", "#FFFFFF", "#C8423B"],
+    greet: "母親節快樂！謝謝媽媽和照顧我們的家人！",
+    pool: [["寫卡片給媽媽", "寫下一句平常不好意思說的感謝。"], ["做康乃馨", "用皺紋紙做一朵送給媽媽的花。"], ["感謝的話大聲說", "在操場上大聲說出「媽媽，謝謝您！」"], ["家事小幫手挑戰", "想一想今天可以幫家人做哪一件家事。"]] },
+  { k: "dragon", name: "端午節", title: "端午龍舟祭", icon: "🐉", at: y => LUNAR.dragon[y], days: 1, prep: 7, cp: "boat", col: ["#2E9E5B", "#F2C14E", "#C8423B", "#2F7FC1"],
+    greet: "端午節快樂！划龍舟、吃粽子，大家平安健康！",
+    pool: [["划龍舟比賽", "在操場上用旱地龍舟比賽，看哪一隊最快。"], ["立蛋挑戰", "中午十二點，試試看能不能把蛋立起來。"], ["包粽子", "學一學粽子怎麼包，原來要綁好幾圈。"], ["做香包", "縫一個小香包，掛在書包上。"]] },
+  { k: "harvest", name: "原住民族日", title: "原住民族日．收穫祭", icon: "🌾", at: y => [8, 1], days: 1, prep: 10, cp: "bonfire", col: ["#B5322A", "#E8B33A", "#232323", "#3E7D4F"],
+    greet: "原住民族日快樂！感謝祖先和土地，一起慶祝豐收！",
+    pool: [["排灣族圓舞", "手牽手圍成一圈，跟著歌聲踏步。"], ["小米麻糬製作", "用小米做成香香的麻糬，大家一起分享。"], ["族語歌謠合唱", "用族語唱一首祖先傳下來的歌。"], ["vuvu 說故事", "聽 vuvu 說部落的故事。"], ["琉璃珠手作", "認識琉璃珠的意義，做一串自己的手鍊。"], ["盪鞦韆介紹", "認識收穫祭裡盪鞦韆的傳統。"]] },
+  { k: "teacher", name: "教師節", title: "感恩教師節", icon: "🍎", at: y => [9, 28], days: 1, prep: 7, cp: "balloons", col: ["#C8423B", "#F2C14E", "#2E9E5B", "#FFFFFF"],
+    greet: "教師節快樂！謝謝每一位老師的用心！",
+    pool: [["寫感謝卡給老師", "寫下老師教過你最重要的一件事。"], ["奉茶敬師", "雙手奉上一杯茶，說聲老師辛苦了。"], ["師生默契大考驗", "老師和同學一起回答問題，看誰最有默契。"], ["老師小時候", "聽老師說說他們小時候的學校生活。"]] },
+  { k: "moon", name: "中秋節", title: "中秋賞月晚會", icon: "🌕", at: y => LUNAR.moon[y], days: 1, prep: 7, cp: "moon", col: ["#F2C14E", "#E07B1F", "#FFFFFF", "#8A5CC2"],
+    greet: "中秋節快樂！月圓人團圓！",
+    pool: [["剝柚子戴柚子帽", "把柚子皮剝下來，做一頂柚子帽。"], ["中秋故事時間", "聽嫦娥奔月和玉兔的故事。"], ["月餅 DIY", "壓一壓模具，做出自己的月餅。"], ["賞月小知識", "為什麼中秋的月亮特別圓？"], ["猜燈謎", "猜猜看，答對有獎。"]] },
+  { k: "national", name: "國慶日", title: "國慶歡樂日", icon: "🎉", at: y => [10, 10], days: 1, prep: 5, cp: "balloons", col: ["#C8242B", "#1F3F8F", "#FFFFFF", "#F2C14E"],
+    greet: "國慶日快樂！認識我們的家鄉臺灣！",
+    pool: [["臺灣小知識搶答", "臺灣最高的山是哪一座？快來搶答！"], ["環島地圖拼圖", "把臺灣各縣市拼回正確的位置。"], ["家鄉介紹", "說一說金峰鄉和嘉蘭村有什麼特別的地方。"], ["國旗彩繪", "畫一面你心中的旗幟。"]] },
+  { k: "halloween", name: "萬聖節", title: "萬聖節變裝派對", icon: "🎃", at: y => [10, 31], days: 1, prep: 7, cp: "pumpkins", col: ["#E07B1F", "#2B2B2B", "#8A5CC2", "#F2C14E"],
+    greet: "不給糖就搗蛋！萬聖節快樂！",
+    pool: [["南瓜燈彩繪", "在南瓜上畫出最搞笑的表情。"], ["變裝遊行", "穿上自己做的服裝繞操場一圈。"], ["不給糖就搗蛋", "到每一座學習館說一聲「不給糖就搗蛋」！"], ["不恐怖的鬼故事", "聽一個一點都不可怕的鬼故事。"]] },
+  { k: "christmas", name: "聖誕節", title: "聖誕嘉年華", icon: "🎄", at: y => [12, 25], from: -1, days: 2, prep: 14, cp: "tree", col: ["#C8242B", "#2E7D4F", "#F2C14E", "#FFFFFF"],
+    greet: "聖誕快樂！祝大家平安喜樂，收到好多祝福！",
+    pool: [["聖誕樹點燈", "大家一起倒數，點亮操場中間的聖誕樹。"], ["交換禮物", "準備一份小禮物，和同學交換驚喜。"], ["聖誕歌曲大合唱", "全島助教一起唱〈平安夜〉和〈聖誕鈴聲〉。"], ["聖誕卡片寫給家人", "寫一張卡片，祝福最重要的人。"], ["尋找聖誕藍鵲", "島上的台灣藍鵲也戴上聖誕帽了，找找看！"], ["薑餅人裝飾", "幫薑餅人畫上表情和衣服。"]] }
+];
+const dayNo = (y, m, d) => Math.round(Date.UTC(y, m - 1, d) / 864e5);
+function festInstances(y) {
+  return FESTS.map(f => { const at = f.at(y); if (!at) return null; const day = dayNo(y, at[0], at[1]), s = day + (f.from || 0); return { f, y, day, start: s, end: s + f.days - 1, m: at[0], d: at[1] }; }).filter(Boolean);
+}
+function festState(t) {
+  // 回傳目前（含準備期）或下一個節慶
+  t = t || twNow(); const today = dayNo(t.y, t.m, t.d);
+  const all = [...festInstances(t.y - 1), ...festInstances(t.y), ...festInstances(t.y + 1)].sort((a, b) => a.start - b.start);
+  const live = all.find(e => today >= e.start && today <= e.end);
+  const next = all.find(e => e.start > today);
+  const prep = !live && next && next.start - today <= next.f.prep ? next : null;
+  return { today, live, next, prep, cur: live || prep, mins: t.h * 60 + t.mi, t };
+}
+function festProgram(e) {
+  // 依節慶與年份「自動產生」活動內容：每年挑出不同的三項活動
+  let seed = e.y * 31 + e.f.k.length * 7; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const pool = e.f.pool.slice(); for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  const pick = pool.slice(0, 3);
+  return [["09:00", "開幕", "島主" + HOST_NAME + "帶大家開場，助教們從各年級島走到操場集合。"],
+    ["10:00", pick[0][0], pick[0][1]], ["11:00", pick[1][0], pick[1][1]], ["13:30", pick[2][0], pick[2][1]],
+    ["15:00", "全島助教圍圈舞", "六十位助教手牽手，在操場圍成大圓圈跳排灣族圓舞。"], ["16:00", "活動結束", "助教們回到自己的學習島，明天見！"]];
+}
+const WD = "日一二三四五六";
+function festDateText(e) {
+  const d0 = new Date(e.start * 864e5), d1 = new Date(e.end * 864e5);
+  const f = d => (d.getUTCMonth() + 1) + "月" + d.getUTCDate() + "日（星期" + WD[d.getUTCDay()] + "）";
+  return e.start === e.end ? f(d0) : f(d0) + "～" + f(d1);
+}
+const FEST = { e: null, group: null, label: null, npc: false, chk: 0, toasted: false, nightGlow: [] };
+const festDaytime = st => st.mins >= 9 * 60 && st.mins < 16 * 60;
+function festDecor(e) {
+  const g = new THREE.Group(), f = e.f, C = f.col, cx = TRACK.cx, cz = TRACK.cz;
+  FEST.nightGlow = [];
+  const glowAt = (obj, color, size, x, y, z) => { const s = glow(color, size); s.position.set(x, y, z); obj.add(s); FEST.nightGlow.push(s); };
+  // 操場四周的彩旗
+  const pts = []; for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; pts.push(new V3(cx + Math.cos(a) * 6.6, 0, cz + Math.sin(a) * 3.3)); }
+  pts.forEach((p, i) => {
+    g.add(part(cyl(0.05, 0.06, 2.2, 6), M("#8A6A48"), p.x, 1.1, p.z));
+    const q = pts[(i + 1) % pts.length];
+    for (let k = 0; k < 6; k++) {
+      const t = (k + 0.5) / 6, x = p.x + (q.x - p.x) * t, z = p.z + (q.z - p.z) * t, y = 2.1 - Math.sin(Math.PI * t) * 0.35;
+      const fl = part(cone(0.13, 0.26, 3), M(C[(i + k) % C.length]), x, y - 0.13, z); fl.rotation.x = Math.PI; fl.rotation.y = Math.atan2(q.x - p.x, q.z - p.z); g.add(fl);
+    }
+  });
+  // 活動看板
+  const tex = canvasTex(512, 128, (x, w, h) => {
+    x.fillStyle = C[0]; x.fillRect(0, 0, w, h); x.fillStyle = C[1]; x.fillRect(0, h - 16, w, 16); x.fillRect(0, 0, w, 8);
+    x.fillStyle = "#FFFFFF"; x.font = "bold 58px 'Noto Sans TC', sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(f.icon + " " + f.title, w / 2, h / 2 + 2);
+  });
+  const sign = tplane(4.6, 1.15, tex, cx, 2.55, cz - 3.9, 0); sign.userData.noMerge = true; g.add(sign);
+  [-2.2, 2.2].forEach(dx => g.add(part(cyl(0.06, 0.07, 3.1, 6), M("#6B5B4A"), cx + dx, 1.55, cz - 3.95)));
+  // 中央主題裝置
+  const c = new THREE.Group(); c.position.set(cx, 0, cz); g.add(c);
+  if (f.cp === "tree") {
+    [[1.3, 1.3, 0.9], [1.05, 1.1, 1.65], [0.75, 0.95, 2.35], [0.45, 0.8, 2.95]].forEach(([r, h, y]) => c.add(part(cone(r, h, 9), M("#2E7D4F"), 0, y, 0)));
+    c.add(part(cyl(0.16, 0.2, 0.6, 8), M("#6B4A2B"), 0, 0.3, 0));
+    for (let i = 0; i < 22; i++) { const a = i * 2.4, y = 0.7 + (i % 11) * 0.22, r = 1.15 - (y - 0.7) * 0.42; c.add(part(sph(0.07, 6, 5), M(C[i % 3 === 0 ? 0 : i % 3 === 1 ? 2 : 3]), Math.cos(a) * r, y, Math.sin(a) * r)); }
+    c.add(part(new THREE.OctahedronGeometry(0.22), M("#F2C14E"), 0, 3.45, 0)); glowAt(c, "#FFE08A", 1.6, 0, 3.45, 0);
+    [[0.9, 0.6, "#C8242B"], [-0.8, 0.8, "#2F7FC1"], [0.3, -1.0, "#F2C14E"], [-0.6, -0.8, "#8A5CC2"]].forEach(([x, z, col]) => { c.add(part(box(0.38, 0.32, 0.38), M(col), x, 0.16, z)); c.add(part(box(0.4, 0.06, 0.08), M("#FFFFFF"), x, 0.33, z)); });
+  } else if (f.cp === "lanterns") {
+    c.add(part(box(0.1, 3, 0.1), M("#6B4A2B"), -1.6, 1.5, 0)); c.add(part(box(0.1, 3, 0.1), M("#6B4A2B"), 1.6, 1.5, 0)); c.add(part(box(3.4, 0.1, 0.1), M("#6B4A2B"), 0, 3, 0));
+    for (let i = 0; i < 5; i++) { const x = -1.2 + i * 0.6, y = 2.55 - (i % 2) * 0.25; const l = part(sph(0.22, 10, 8), M("#D3322B"), x, y, 0); l.scale.y = 1.25; c.add(l); c.add(part(cyl(0.1, 0.1, 0.05, 8), M("#F2C14E"), x, y + 0.28, 0)); glowAt(c, "#FF8A4A", 0.9, x, y, 0); }
+    const big = part(sph(0.55, 14, 10), M("#D3322B"), 0, 1.0, 0); big.scale.y = 1.2; c.add(big); c.add(part(cyl(0.25, 0.25, 0.1, 10), M("#F2C14E"), 0, 1.7, 0)); glowAt(c, "#FF9A5A", 2, 0, 1.0, 0);
+  } else if (f.cp === "bonfire") {
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI; const lg = part(cyl(0.08, 0.1, 1.3, 6), M("#5A3A22"), 0, 0.15, 0); lg.rotation.set(Math.PI / 2, a, 0); c.add(lg); }
+    const fl = part(cone(0.45, 1.1, 8), M("#F28C28"), 0, 0.7, 0); c.add(fl); c.add(part(cone(0.25, 0.8, 8), M("#FFD45A"), 0, 0.65, 0)); glowAt(c, "#FFB060", 2.6, 0, 0.8, 0);
+    [[1.3, 0.4], [-1.3, 0.4], [0, -1.2], [1.0, -0.9], [-1.0, -0.9]].forEach(([x, z]) => { const b = new THREE.Group(); b.position.set(x, 0, z); for (let k = 0; k < 7; k++) b.add(part(cyl(0.025, 0.02, 0.9, 4), M("#D9A441"), Math.cos(k) * 0.07, 0.45, Math.sin(k) * 0.07)); b.add(part(sph(0.12, 6, 5), M("#E8B33A"), 0, 0.95, 0)); c.add(b); });
+    [-1.9, 1.9].forEach(x => { const tp = totemPillar(1.6, 0.3); tp.position.set(x, 0, -0.4); c.add(tp); });
+  } else if (f.cp === "pumpkins") {
+    [[0, 0, 0.55], [0.9, 0.3, 0.38], [-0.85, 0.25, 0.42], [0.3, -0.85, 0.32], [-0.4, 0.9, 0.3]].forEach(([x, z, r]) => { const p = part(sph(r, 12, 8), M("#E07B1F"), x, r * 0.8, z); p.scale.y = 0.8; c.add(p); c.add(part(cyl(0.04, 0.05, 0.18, 5), M("#4E7A32"), x, r * 1.55, z)); glowAt(c, "#FFA040", r * 2.2, x, r * 0.8, z + r * 0.6); });
+  } else if (f.cp === "moon") {
+    c.add(part(cyl(0.06, 0.08, 2.6, 6), M("#6B5B4A"), 0, 1.3, -0.3));
+    const moon = new THREE.Mesh(new THREE.CircleGeometry(0.9, 32), new THREE.MeshBasicMaterial({ color: "#FFE9A0" })); moon.position.set(0, 3.0, -0.25); c.add(moon); glowAt(c, "#FFE9A0", 3.4, 0, 3.0, -0.3);
+    [[0.6, 0.5], [-0.6, 0.6], [0, -0.7], [0.9, -0.4]].forEach(([x, z]) => { const p = part(sph(0.28, 10, 8), M("#B9D36A"), x, 0.25, z); p.scale.y = 0.85; c.add(p); });
+  } else if (f.cp === "boat") {
+    const hull = part(box(4.2, 0.35, 0.7), M("#C8423B"), 0, 0.25, 0); c.add(hull); c.add(part(box(4.3, 0.08, 0.75), M("#F2C14E"), 0, 0.45, 0));
+    const head = part(cone(0.3, 0.9, 6), M("#2E9E5B"), 2.4, 0.75, 0); head.rotation.z = -1.1; c.add(head); c.add(part(sph(0.08, 6, 5), M("#FFFFFF"), 2.55, 0.9, 0.2));
+    c.add(part(cyl(0.25, 0.25, 0.3, 10), M("#8A5A3A"), -1.6, 0.6, 0)); for (let i = 0; i < 6; i++) c.add(part(box(0.06, 0.06, 1.2), M("#8A6A48"), -1 + i * 0.5, 0.5, 0, 0.5, 0, 0));
+  } else {   // balloons
+    const cols = C.concat(["#8CB6D6", "#F2A9BE"]);
+    for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI, x = Math.cos(a) * 1.7, y = Math.sin(a) * 2.2 + 0.4; const b = part(sph(0.26, 10, 8), M(cols[i % cols.length]), x, y, 0); b.scale.y = 1.15; c.add(b); }
+    for (let i = 0; i < 7; i++) { const x = (i - 3) * 0.3, y = 1.6 + (i % 2) * 0.35; const b = part(sph(0.22, 10, 8), M(cols[(i + 2) % cols.length]), x, y, 0.5); b.scale.y = 1.15; c.add(b); c.add(part(cyl(0.006, 0.006, y, 3), M("#FFFFFF"), x, y / 2, 0.5)); }
+  }
+  // 小舞臺（島主站的地方）
+  g.add(part(cyl(0.75, 0.85, 0.18, 16), M("#C9A577"), cx, 0.09, cz + 2.95));
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+function stepFest(dt) {
+  FEST.chk -= dt; if (FEST.chk > 0) return; FEST.chk = 2;
+  const st = festState(), e = st.cur;
+  const key = e ? e.f.k + e.y : "";
+  if (key !== (FEST.e ? FEST.e.f.k + FEST.e.y : "")) {
+    if (FEST.group) { scene.remove(FEST.group); FEST.group = null; }
+    FEST.e = e || null;
+    if (e && webgl) { FEST.group = festDecor(e); scene.add(FEST.group); FEST.anchor = new THREE.Object3D(); FEST.anchor.position.set(TRACK.cx, 3.4, TRACK.cz - 3.9); FEST.group.add(FEST.anchor); }
+    if (FEST.label) { FEST.label.el.remove(); labels.splice(labels.indexOf(FEST.label), 1); FEST.label = null; }
+    if (e && FEST.anchor) FEST.label = addLabel(FEST.anchor, 0.2, "fest", { e }, () => openFest());
+  }
+  FEST.npc = !!(st.live && festDaytime(st));
+  FEST.nightGlow.forEach(s => { s.visible = S.dark > 0.3; });
+  if (FEST.npc && !FEST.toasted) { FEST.toasted = true; let seen = false; try { seen = sessionStorage.getItem("jialan:festToast") === key; sessionStorage.setItem("jialan:festToast", key); } catch (er) {} if (!seen) setTimeout(() => toast(st.live.f.icon + " " + st.live.f.title + "正在嘉蘭國小操場舉行！全島助教都到操場集合了。"), 2500); }
+}
+function festStatusText(st, e) {
+  if (!e) return "";
+  if (st.live === e) return festDaytime(st) ? "🔴 活動進行中（今天 16:00 結束）" : st.mins < 9 * 60 ? "今天 9:00 開始" : "今天的活動已結束" + (st.today < e.end ? "，明天 9:00 繼續" : "");
+  const n = e.start - st.today; return n === 1 ? "明天開始" : "還有 " + n + " 天";
+}
+function openFest() {
+  const st = festState(), e = st.cur || st.next; if (!e) return;
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  const f = e.f, prog = festProgram(e), liveNow = st.live === e && festDaytime(st);
+  const stamps = store("stamps") || {}, sk = f.k + e.y, got = !!stamps[sk];
+  openModal('<div class="npc-card fest" style="--s:' + f.col[0] + '"><button class="m-close" aria-label="關閉">×</button>' +
+    '<div class="npc-head"><div class="npc-ava fest">' + f.icon + '</div><div><small>嘉蘭樂學島．節慶活動</small><h2>' + esc(f.title) + '</h2><p class="npc-why">' + esc(festStatusText(st, e)) + '</p></div></div>' +
+    '<div class="npc-bubble">' + esc(f.greet) + '</div>' +
+    '<dl class="kv fest-kv"><dt>日期</dt><dd>' + festDateText(e) + '</dd><dt>時間</dt><dd>白天 9:00～16:00</dd><dt>地點</dt><dd>嘉蘭國小操場</dd><dt>主持</dt><dd>島主' + esc(HOST_NAME) + '和全島 60 位助教</dd></dl>' +
+    '<h3>📋 活動節目</h3><ol class="fest-prog">' + prog.map(p => '<li><b>' + p[0] + '</b><span><strong>' + esc(p[1]) + '</strong>' + esc(p[2]) + '</span></li>').join("") + '</ol>' +
+    '<div class="row npc-act">' + (liveNow ? '<button class="btn" id="festStamp"' + (got ? " disabled" : "") + '>' + (got ? "✓ 已經簽到了" : "✍ 活動簽到") + '</button>' : "") + (location.hash !== "#hub" ? '<button class="btn ghost" data-go="hub">到操場看看 →</button>' : "") + '<button class="say" id="festSay">' + ICON_SPEAK + '聽一聽</button></div></div>', "npc-sheet");
+  $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
+  $("#festSay").addEventListener("click", () => speak(f.greet + f.title + "，" + festDateText(e) + "，白天九點到下午四點，在嘉蘭國小操場。", { force: true }));
+  const sb = $("#festStamp"); if (sb) sb.addEventListener("click", () => { const s2 = store("stamps") || {}; s2[sk] = 1; store("stamps", s2); sb.disabled = true; sb.textContent = "✓ 已經簽到了"; playCheer(false); confetti(); setTimeout(() => speak("簽到成功！" + f.greet), 1800); });
+  speak(f.greet);
+}
+
+/* ===================== 每日島報：每天第一次上島時送到 ===================== */
+const NEWS = (window.JIALAN_NEWS || []).slice(0, 5);
+const todayKey = () => { const t = twNow(); return t.y + "-" + t.m + "-" + t.d; };
+function openLessonsNow() {
+  // 收集目前所有開放的課（需要讀取試算表的會等一下）
+  const books = Object.keys(BOOKS).flatMap(k => BOOKS[k]).filter(b => b.live);
+  const wait = books.filter(b => !b.data && !b.error).map(b => Promise.race([loadBook(b).catch(e => { b.error = e.message; }), new Promise(r => setTimeout(r, 5000))]));
+  return Promise.all(wait).then(() => {
+    const out = [];
+    books.forEach(b => { if (!b.data) return; b.data.units.forEach(u => u.items.forEach(it => { if (it.live && b.data.lessons[it.id]) out.push({ k: lessonHash(b, it.id), g: b.g, key: b.key, it }); })); });
+    return out;
+  });
+}
+function loadNotices() {
+  const id = sheetId(CFG.masterSheet); if (!id) return Promise.resolve([]);
+  return fetchTab(id, "最新消息").then(rows => rows.map(r => ({ date: TXT(r["日期"]), title: TXT(r["標題"]), text: TXT(r["內容"]), link: safeUrl(TXT(r["連結"])) })).filter(r => r.title)).catch(() => []);
+}
+// 網路新聞：由 Cloudflare Pages Function（functions/api/news.js）每 12 小時抓一次；瀏覽器也記住 12 小時
+function loadLiveNews() {
+  try { const c = store("newsCache"); if (c && Date.now() - c.t < 12 * 3600e3 && c.items && c.items.length) return Promise.resolve(c.items); } catch (e) {}
+  if (!/^https?:$/.test(location.protocol)) return Promise.resolve([]);
+  const req = fetch("/api/news", { headers: { accept: "application/json" } }).then(r => r.ok ? r.json() : { items: [] })
+    .then(j => { const items = (j.items || []).filter(n => n.title && /^https:\/\//.test(n.url)).slice(0, 5); if (items.length) store("newsCache", { t: Date.now(), items }); return items; }).catch(() => []);
+  return Promise.race([req, new Promise(r => setTimeout(() => r([]), 4500))]);
+}
+// 老師手動挑的新聞（總表「新聞」分頁，90 天內）
+function loadManualNews() {
+  const id = sheetId(CFG.masterSheet); if (!id) return Promise.resolve([]);
+  const today = (() => { const t = twNow(); return dayNo(t.y, t.m, t.d); })();
+  return fetchTab(id, "新聞").then(rows => rows.map(r => {
+    const d = TXT(r["日期"]).match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/), n = d ? dayNo(+d[1], +d[2], +d[3]) : null;
+    return { title: TXT(r["標題"]), source: TXT(r["來源"]), url: safeUrl(TXT(r["連結"])), sum: TXT(r["摘要"]), date: d ? d[1] + "-" + ("0" + d[2]).slice(-2) + "-" + ("0" + d[3]).slice(-2) : TXT(r["日期"]), n, manual: true };
+  }).filter(x => x.title && x.url && (x.n == null || x.n >= today - 90)).sort((a, b) => (b.n || 0) - (a.n || 0))).catch(() => []);
+}
+function mergeNews(manual, live) {
+  // 老師挑的新聞優先，不足 5 則再用自動抓的補滿；都沒有就用備用新聞
+  const out = [], seen = new Set(), key = t => t.replace(/[\s　、，,。．.「」『』!！?？:：]/g, "").slice(0, 16);
+  [...manual, ...live].forEach(n => { const k = key(n.title); if (!seen.has(k) && out.length < 5) { seen.add(k); out.push(n); } });
+  return { list: out.length ? out : NEWS, live: live.length > 0 && out.some(n => !n.manual), manual: manual.length > 0 };
+}
+function openPaper(auto) {
+  const t = twNow(), st = festState(t), mark = store("paper") || {};
+  modalBack = (location.hash || "#home").replace(/^#/, ""); if (modalBack === "paper") modalBack = "home";
+  const issue = Math.max(1, dayNo(t.y, t.m, t.d) - dayNo(2026, 10, 1) + 1), wd = WD[new Date(Date.UTC(t.y, t.m - 1, t.d)).getUTCDay()];
+  openModal('<article class="paper"><button class="m-close" aria-label="關閉">×</button>' +
+    '<header class="paper-mast"><div class="pm-top"><span>第 ' + issue + ' 期</span><span>每天第一次上島送到</span><span>臺東．金峰．嘉蘭</span></div>' +
+    '<h1>嘉蘭樂學島 <em>島報</em></h1>' +
+    '<div class="pm-date">中華民國 ' + (t.y - 1911) + ' 年 ' + t.m + ' 月 ' + t.d + ' 日　星期' + wd + (weather ? '　' + esc(weather.text) + ' ' + weather.temp + '°C' : "") + '</div></header>' +
+    '<div id="paperBody"><p class="loading">島報印刷中…</p></div>' +
+    '<footer class="paper-foot"><button class="btn" id="paperOk">我看過了 ✓</button><span>明天第一次上島時，會再送來新的一期。</span></footer></article>', "paper-sheet");
+  const done = () => { const m = store("paper") || {}; m.date = todayKey(); store("paper", m); };
+  $("#paperOk").addEventListener("click", () => { done(); playChime(); go(modalBack); });
+  $(".paper .m-close").addEventListener("click", done);
+  Promise.all([openLessonsNow(), loadNotices(), loadLiveNews(), loadManualNews()]).then(([lessons, notices, live, manual]) => {
+    const mn = mergeNews(manual, live), news = mn.list;
+    const box = $("#paperBody"); if (!box) return;
+    const seen = mark.seen || null, fresh = seen ? lessons.filter(l => seen.indexOf(l.k) < 0) : [];
+    const m = store("paper") || {}; m.seen = lessons.map(l => l.k); store("paper", m);
+    const recentNotice = notices.filter(n => { const d = n.date.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/); return !d || dayNo(+d[1], +d[2], +d[3]) >= st.today - 14; }).slice(0, 4);
+    let h = "";
+    // 頭版：節慶活動
+    const e = st.cur || st.next;
+    if (e) {
+      const prog = festProgram(e).slice(1, 5).map(p => p[1]).join("、");
+      h += '<section class="ps lead" style="--s:' + e.f.col[0] + '"><span class="kicker">' + (st.live === e ? "今日活動" : "島上活動預告") + '</span>' +
+        '<h2>' + e.f.icon + ' ' + esc(e.f.title) + '</h2><p class="byline">' + festDateText(e) + '．白天 9:00～16:00．嘉蘭國小操場．' + esc(festStatusText(st, e)) + '</p>' +
+        '<p>' + esc(e.f.greet) + '島主' + esc(HOST_NAME) + '邀請全島 60 位助教到操場集合，節目有' + esc(prog) + '，最後大家手牽手跳排灣族圓舞。</p>' +
+        '<button class="btn ghost sm" id="paperFest">看活動節目 →</button></section>';
+    }
+    // 新開放的學習內容
+    if (fresh.length) h += '<section class="ps"><span class="kicker">新開放</span><h2>學習島上新開放 ' + fresh.length + ' 課</h2><ul class="plist">' + fresh.slice(0, 6).map(l => '<li><button class="plink" data-go="' + l.k + '">' + esc(GRADES[l.g - 1].name + subjectOf(l.key).name + "．" + (l.it.no ? "第" + l.it.no + "課 " : "") + l.it.title) + ' →</button></li>').join("") + '</ul></section>';
+    else if (!seen && lessons.length) h += '<section class="ps"><span class="kicker">目前開放</span><h2>現在可以學的課</h2><ul class="plist">' + lessons.slice(0, 6).map(l => '<li><button class="plink" data-go="' + l.k + '">' + esc(GRADES[l.g - 1].name + subjectOf(l.key).name + "．" + (l.it.no ? "第" + l.it.no + "課 " : "") + l.it.title) + ' →</button></li>').join("") + '</ul></section>';
+    if (!fresh.length && seen && lessons.length) { const l = lessons[issue % lessons.length]; h += '<section class="ps"><span class="kicker">今日推薦</span><h2>今天來複習這一課</h2><ul class="plist"><li><button class="plink" data-go="' + l.k + '">' + esc(GRADES[l.g - 1].name + subjectOf(l.key).name + "．" + (l.it.no ? "第" + l.it.no + "課 " : "") + l.it.title) + ' →</button></li></ul><p class="pnote">每天自動換一課；再挑戰一次，說不定能拿到三顆星！</p></section>'; }
+    if (recentNotice.length) h += '<section class="ps"><span class="kicker">老師公告</span>' + recentNotice.map(n => '<h3>' + esc(n.title) + (n.date ? ' <small>' + esc(n.date) + '</small>' : "") + '</h3>' + (n.text ? '<p>' + esc(n.text) + '</p>' : "") + (n.link ? '<p><a href="' + esc(n.link) + '" target="_blank" rel="noopener">看更多 ↗</a></p>' : "")).join("") + '</section>';
+    // 沒有新東西：刊出 AI 學習新聞
+    const nothingNew = !fresh.length && !recentNotice.length && seen;
+    if ((nothingNew || !h) && news.length) h += '<section class="ps news"><span class="kicker">AI 學習新聞</span><h2>和 AI 一起學習：最近的新聞</h2><ol class="nlist">' + news.map(n => '<li><a href="' + esc(n.url) + '" target="_blank" rel="noopener"><b>' + (n.manual ? "⭐ " : "") + esc(n.title) + '</b></a><small>' + esc((n.source || "") + "．" + (n.date || "")) + '</small>' + (n.sum ? '<p>' + esc(n.sum) + '</p>' : "") + '</li>').join("") + '</ol><p class="pnote">' + (mn.manual ? "⭐ 是老師挑選的新聞。" : "") + (mn.live ? "其餘新聞每 12 小時自動更新，只收錄教育部、公視、中央社等可信來源。" : "") + '點標題會開新分頁看原文。</p></section>';
+    box.innerHTML = h || '<p class="p-lede">今天島上很平靜，去學習館逛逛吧！</p>';
+    $all("[data-go]", box).forEach(b => b.addEventListener("click", () => { done(); go(b.getAttribute("data-go")); }));
+    const pf = $("#paperFest"); if (pf) pf.addEventListener("click", () => { done(); openFest(); });
+    if (auto) speak("今天的嘉蘭樂學島島報送到了！" + (e ? e.f.title + "，" + festStatusText(st, e) + "。" : ""));
+  });
+}
+function maybeDailyPaper() {
+  let tries = 0;
+  const chk = () => {
+    tries++;
+    const m = store("paper") || {};
+    if (m.date === todayKey()) return;
+    if (!store("guided") || !$("#modal").hidden || registry.status === "loading") { if (tries < 40) setTimeout(chk, 3000); return; }
+    openPaper(true);
+  };
+  setTimeout(chk, 2500);
+}
+
+/* ===================== 工具港：學校的學習工具入口（考卷訂正小幫手等） ===================== */
+// 工具清單：先用 data/tools.js；總表有「工具登記」分頁時，以總表為準（老師只要在試算表加一列）
+const HARBOR_POS = new V3(Math.cos(Math.PI / 3) * 20.5, 0, Math.sin(Math.PI / 3) * 20.5), HARBOR_R = 4.2;
+const TOOL_COLORS = ["#139A9A", "#E07B1F", "#8B55B8", "#2B7BD6", "#C8423B", "#2E9E5B"];
+const TOOL_BLD = ["tower", "clock", "atelier", "math", "academy", "dome"];
+const TOOLS = { list: [], loaded: false, huts: [], group: null };
+function normTool(t, i) {
+  const who = /老師|教師|行政/.test(t.who || "") ? "老師" : "學生";
+  return { name: t.name || "", desc: t.desc || "", url: safeUrl(t.url || "") || "", who, icon: t.icon || (who === "老師" ? "🗂" : "🧰"), live: t.live !== false, i };
+}
+function loadTools() {
+  const local = (window.JIALAN_TOOLS || []).map(normTool);
+  const id = sheetId(CFG.masterSheet);
+  const done = list => { TOOLS.list = list.filter(t => t.name && (t.live || previewMode)).map((t, i) => Object.assign(t, { i })); TOOLS.loaded = true; buildToolHuts(); return TOOLS.list; };
+  if (!id) return Promise.resolve(done(local));
+  return fetchTab(id, "工具登記").then(rows => {
+    const list = rows.map(r => normTool({ name: TXT(r["名稱"]), desc: TXT(r["說明"]), url: TXT(r["網址"]), who: TXT(r["對象"]), icon: TXT(r["圖示"]), live: TXT(r["上線"]) !== "否" }));
+    return done(list.length ? list : local);
+  }).catch(() => done(local));
+}
+const studentTools = () => TOOLS.list.filter(t => t.who === "學生");
+const teacherTools = () => TOOLS.list.filter(t => t.who === "老師");
+function makeHarbor() {
+  const root = new THREE.Group(), out = HARBOR_POS.clone().normalize(), yaw = Math.atan2(out.x, out.z);
+  floatingIsland(HARBOR_R, 2.0, root, 0, 0, { type: "tools" });
+  // 碼頭：朝外海伸出去的木棧道，旁邊停一艘小船
+  const pier = new THREE.Group(); pier.rotation.y = yaw; root.add(pier);
+  for (let i = 0; i < 9; i++) pier.add(part(box(1.3, 0.08, 0.32), M("#B8925E"), 0, 0.02, HARBOR_R - 0.6 + i * 0.4));
+  [[0.6, 0], [-0.6, 0], [0.6, 3.2], [-0.6, 3.2]].forEach(([x, z]) => pier.add(part(cyl(0.07, 0.08, 1.4, 6), M("#7A5A3A"), x, -0.45, HARBOR_R - 0.4 + z)));
+  const bt = boat("#1F6FB2", false); bt.scale.setScalar(0.42); bt.position.set(1.55, SEA_Y + 0.15, HARBOR_R + 1.6); bt.rotation.y = Math.PI / 2; pier.add(bt);
+  // 港口燈塔（小）和招牌
+  const lh = new THREE.Group(); lh.position.set(-2.6, 0, 1.6); lh.rotation.y = yaw; root.add(lh);
+  lh.add(part(cyl(0.28, 0.36, 1.6, 10), M("#FFFFFF"), 0, 0.8, 0)); lh.add(part(cyl(0.3, 0.3, 0.22, 10), M(soft("#C8423B")), 0, 1.0, 0));
+  lh.add(part(cyl(0.22, 0.22, 0.32, 10), winMat, 0, 1.76, 0)); lh.add(part(cone(0.3, 0.32, 10), M(soft("#C8423B")), 0, 2.08, 0));
+  const sb = signBoard("工具港", "#17607A", 2.2); sb.position.set(0.2, 0, 2.7); sb.rotation.y = yaw + Math.PI; root.add(sb);
+  [[2.8, -1.8, "pine", 1.0], [-3.0, -1.2, "a", 0.9]].forEach(t => { const tr = tree(t[2], t[3]); tr.position.set(t[0], 0, t[1]); root.add(tr); });
+  mergeStatic(root); root.position.copy(HARBOR_POS); scene.add(root);
+  // 吊橋：嘉蘭國小 → 工具港
+  const hb = new THREE.Group();
+  ropeBridge(hb, out.clone().multiplyScalar(R_HUB - 0.2), out.clone().multiplyScalar(20.5 - HARBOR_R + 0.2), 0.8, 1.3, 8);
+  mergeStatic(hb); scene.add(hb);
+  TOOLS.group = new THREE.Group(); TOOLS.group.position.copy(HARBOR_POS); scene.add(TOOLS.group);
+  TOOLS.anchor = new THREE.Object3D(); TOOLS.anchor.position.set(0.2, 2.3, 2.7); TOOLS.group.add(TOOLS.anchor);
+  addLabel(TOOLS.anchor, 0.4, "plain", { name: "⚓ 工具港" }, () => go("tools"));
+}
+function buildToolHuts() {
+  if (!webgl || !TOOLS.group) return;
+  TOOLS.huts.forEach(h => { TOOLS.group.remove(h.g); const k = pickables.indexOf(h.hit); if (k >= 0) pickables.splice(k, 1); if (h.label) { h.label.el.remove(); labels.splice(labels.indexOf(h.label), 1); } });
+  TOOLS.huts = [];
+  const list = studentTools().slice(0, 5), out = HARBOR_POS.clone().normalize(), base = Math.atan2(out.z, out.x) + Math.PI;
+  // 沒登記任何學生工具時，放一棟「建造中」的工具館
+  const shown = list.length ? list : [{ name: "學習工具", desc: "", url: "", icon: "🧰", i: -1, placeholder: true }];
+  shown.forEach((t, k) => {
+    const a = base + (k - (shown.length - 1) / 2) * 0.95, x = Math.cos(a) * 2.2, z = Math.sin(a) * 2.2;
+    const g = building(TOOL_BLD[k % TOOL_BLD.length], TOOL_COLORS[k % TOOL_COLORS.length]); g.scale.setScalar(0.78); g.position.set(x, 0.02, z); g.rotation.y = Math.atan2(-x, -z) + Math.PI;
+    if (!t.url) { const tc = trafficCone(); tc.position.set(0.9, 0, 0.9); g.add(tc); }
+    TOOLS.group.add(g);
+    const hit = new THREE.Mesh(cyl(1.0, 1.0, 2.4, 10), new THREE.MeshBasicMaterial({ visible: false })); hit.position.set(x, 1.1, z);
+    hit.userData = { pick: true, type: "tool", i: t.i }; TOOLS.group.add(hit); pickables.push(hit);
+    const an = new THREE.Object3D(); an.position.set(x, 2.4, z); TOOLS.group.add(an);
+    const label = addLabel(an, 0.1, "tool", { t, color: TOOL_COLORS[k % TOOL_COLORS.length] }, () => openTool(t.i));
+    TOOLS.huts.push({ g, hit, label });
+  });
+  refreshLabels();
+}
+function harborPose() {
+  const out = HARBOR_POS.clone().normalize(), dir = new V3(0, 0, 1).lerp(out, 0.4).normalize();
+  const target = HARBOR_POS.clone(), pos = target.clone().add(dir.multiplyScalar(isMobile() ? 18 : 15)).add(new V3(0, isMobile() ? 24 : 18, 0));
+  shiftForPanel(target, pos); return { target, pos };
+}
+function toolCard(t, big) {
+  const open = !!t.url;
+  return '<div class="tool-card' + (open ? "" : " off") + '"><span class="tc-ic">' + esc(t.icon) + '</span><div class="tc-tx"><b>' + esc(t.name) + '</b><small>' + esc(t.desc || (open ? "" : "建造中，敬請期待")) + '</small></div>' +
+    (open ? '<a class="btn' + (big ? "" : " sm") + '" href="' + esc(t.url) + '" target="_blank" rel="noopener">開啟 ↗</a>' : '<span class="tc-soon">建造中</span>') + '</div>';
+}
+function panelTools(quiet) {
+  const list = studentTools();
+  openPanel('<div class="p-top"><span class="crumb">嘉蘭樂學島</span><button class="p-close" aria-label="關閉">×</button></div>' +
+    '<h2 style="--c:#17607A"><i class="dot"></i>⚓ 工具港</h2><p class="p-lede">學校的學習小幫手都停靠在這裡。點一下就會在新分頁打開，用完關掉分頁就回到樂學島。</p>' +
+    (TOOLS.loaded ? (list.length ? '<div class="tool-list">' + list.map(t => toolCard(t)).join("") + '</div>' : '<div class="building-msg">工具港還在建造中，第一批工具很快就會靠岸！</div>') : '<div class="loading">讀取中…</div>'), "subject");
+  if (!quiet) speak("工具港，學校的學習小幫手都在這裡。");
+}
+function openTool(i) {
+  const t = TOOLS.list.find(x => x.i === i);
+  if (!t) { go("tools"); return; }
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  openModal('<div class="npc-card" style="--s:#17607A"><button class="m-close" aria-label="關閉">×</button>' +
+    '<div class="npc-head"><div class="npc-ava tool">' + esc(t.icon) + '</div><div><small>工具港．學習小幫手</small><h2>' + esc(t.name) + '</h2></div></div>' +
+    '<div class="npc-bubble">' + esc(t.desc || "學校的學習小幫手。") + '</div>' +
+    '<div class="row npc-act">' + (t.url ? '<a class="btn" href="' + esc(t.url) + '" target="_blank" rel="noopener">開啟' + esc(t.name) + ' ↗</a><span class="small">會在新分頁打開</span>' : '<span class="tc-soon">建造中，敬請期待</span>') + '</div></div>', "npc-sheet");
+  speak(t.name + "。" + (t.desc || ""));
+}
+
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
     GRADES.map(g => '<section class="list-isl" style="--g:' + g.color + '"><h2><i class="dot" style="background:' + g.color + '"></i>' + g.name + '學習島</h2><div class="chips">' + SUBJECTS.map(s => {
       const open = isOpen(g.n, s.key);
       return '<button class="chipbtn ' + (open ? "open" : "") + '" data-go="g' + g.n + '-' + s.key + '" style="--s:' + s.color + '">' + s.name + (open ? "" : "<small>建造中</small>") + '</button>';
-    }).join("") + '</div></section>').join(""), "list");
+    }).join("") + '</div></section>').join("") +
+    '<section class="list-isl" style="--g:#17607A"><h2><i class="dot" style="background:#17607A"></i>⚓ 工具港</h2><div class="chips">' + (studentTools().length ? studentTools().map(t => '<button class="chipbtn' + (t.url ? " open" : "") + '" data-tool="' + t.i + '" style="--s:#17607A">' + esc(t.icon + " " + t.name) + (t.url ? "" : "<small>建造中</small>") + '</button>').join("") : '<button class="chipbtn" data-go="tools" style="--s:#17607A">工具港<small>建造中</small></button>') + '</div></section>', "list");
+  $all("#modal [data-tool]").forEach(b => b.addEventListener("click", () => openTool(+b.getAttribute("data-tool"))));
   $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
 }
 
@@ -3052,6 +3490,7 @@ function refreshOpenState() {
   refreshLabels(); updateFootprints();
   if ($("#modal").hidden) {
     if (focus.key) panelSubject(focus.g, focus.key, true);
+    else if (focus.g === 7) panelTools(true);
     else if (focus.g) panelIsland(focus.g);
     else if (focus.g === null) panelHome();
   }
@@ -3065,6 +3504,21 @@ const GUIDE = [
   ["打開一課開始學", "點課名就能讀課文、學生字、做挑戰。看到喇叭就點，它會唸給你聽。", '<path d="M10 20v8h6l8 7V13l-8 7z" fill="currentColor"/><path d="M30 17a8 8 0 0 1 0 14M34 13a13 13 0 0 1 0 22" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>'],
   ["找找台灣藍鵲", "島上躲著十隻台灣藍鵲，找到牠們就點一下！坐船繞島的大藍鵲是你的嚮導。", '<ellipse cx="22" cy="26" rx="10" ry="7" fill="currentColor"/><circle cx="31" cy="20" r="5" fill="currentColor"/><path d="M36 20l6 1.5-6 1.5z" fill="#D8322B"/><path d="M13 27 3 34l3 1 9-5z" fill="currentColor"/>']
 ];
+// 全螢幕：iPhone 和「嵌在別的網頁裡（iframe）」時瀏覽器不允許，改用提示說明
+function fullscreenBlockedMsg() {
+  const ios = /iPhone|iPod/.test(navigator.userAgent), framed = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+  if (framed) return "樂學島現在是嵌在別的網頁裡，瀏覽器不允許全螢幕。請直接打開樂學島的網址再試一次。";
+  if (ios) return "iPhone 不支援網頁全螢幕。可以按分享 →「加入主畫面」，從主畫面打開就會像 App 一樣滿版。";
+  return "這個瀏覽器不允許全螢幕，可以試試按鍵盤的 F11。";
+}
+function toggleFullscreen() {
+  const d = document, el = d.documentElement;
+  if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
+  const req = el.requestFullscreen || el.webkitRequestFullscreen, enabled = d.fullscreenEnabled || d.webkitFullscreenEnabled;
+  if (!req || enabled === false) { toast(fullscreenBlockedMsg()); return; }
+  try { const r = req.call(el); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+  setTimeout(() => { if (!(d.fullscreenElement || d.webkitFullscreenElement)) toast(fullscreenBlockedMsg()); }, 800);
+}
 function openGuide() {
   modalBack = location.hash.replace(/^#/, "") || "home"; if (modalBack === "guide") modalBack = "home";
   openModal('<div class="m-head"><h1 class="serif">上島探索指南</h1><button class="m-close" aria-label="關閉">×</button></div>' +
@@ -3090,6 +3544,7 @@ function openInfo() {
     '<section class="t-sec"><h2>時光機</h2><p class="small">暫時切換日期與時間，看看白天、夜晚和四季的樣子。</p>' +
       '<div class="form-row"><label for="pvDate">日期<input id="pvDate" type="date" value="' + o.y + "-" + ("0" + o.m).slice(-2) + "-" + ("0" + o.d).slice(-2) + '"></label><label for="pvTime">時間<input id="pvTime" type="time" value="' + ("0" + o.h).slice(-2) + ":" + ("0" + o.mi).slice(-2) + '"></label></div>' +
       '<div class="row" style="margin-top:10px">' + [["春天早晨", "04-02", "07:30"], ["夏天夜晚", "07-15", "20:30"], ["秋天黃昏", "10-25", "17:15"], ["冬天中午", "01-10", "12:20"]].map(x => '<button class="pill" data-pv="' + x[1] + " " + x[2] + '">' + x[0] + '</button>').join("") + '</div>' +
+      '<div class="row" style="margin-top:10px"><b class="small" style="min-width:3em">節慶</b>' + (() => { const st = festState(twNow()), list = [...festInstances(st.t.y), ...festInstances(st.t.y + 1)].filter(e => e.end >= st.today).sort((a, b) => a.start - b.start).slice(0, 4); return list.map(e => { const d = new Date(e.day * 864e5); return '<button class="pill" data-pvf="' + d.getUTCFullYear() + "-" + (d.getUTCMonth() + 1) + "-" + d.getUTCDate() + ' 10:30">' + e.f.icon + e.f.name + '活動</button>'; }).join(""); })() + '</div>' +
       '<div class="row" style="margin-top:10px"><button class="btn" id="pvGo">預覽</button><button class="btn ghost" id="pvReset">回到現在</button></div></section>' +
     '<section class="t-sec"><h2>老師</h2><p class="small">QR Code、預覽模式、教材試算表連線檢查都在老師專區。</p><button class="btn" data-go2="teacher">老師專區</button></section>' +
     '<p class="small">嘉蘭樂學島．臺東縣金峰鄉嘉蘭國小｜教材內容整理自出版社教科書，僅供教學使用。</p>', "info-sheet");
@@ -3110,6 +3565,7 @@ function openInfo() {
   $("#pvGo").addEventListener("click", () => setPreview($("#pvDate").value, $("#pvTime").value));
   $("#pvReset").addEventListener("click", () => { override = null; applyTime(); toast("已回到現在時間"); });
   $all("[data-pv]").forEach(b => b.addEventListener("click", () => { const v = b.getAttribute("data-pv").split(" "); setPreview(twNow().y + "-" + v[0], v[1]); }));
+  $all("[data-pvf]").forEach(b => b.addEventListener("click", () => { const v = b.getAttribute("data-pvf").split(" "); setPreview(v[0], v[1]); FEST.chk = 0; FEST.toasted = false; go("hub"); }));
 }
 function setPreview(dstr, tstr) {
   const d = dstr.split("-"), t = tstr.split(":");
@@ -3150,7 +3606,8 @@ function route() {
   if (h === "info") { openInfo(); return; }
   closeModal();
   if (h !== "home") hideHero();
-  if (h === "hub") { focus.g = 0; focus.key = null; panelHub(); fly("hub", () => { const t = new V3(0, 0.6, 0), p = new V3(3, isMobile() ? 38 : 25, isMobile() ? 44 : 30); shiftForPanel(t, p); return { target: t, pos: p }; }); }
+  if (h === "tools") { if (panelMin()) setPanelMin(false, false); focus.g = 7; focus.key = null; panelTools(); fly("tools", harborPose); }
+  else if (h === "hub") { focus.g = 0; focus.key = null; panelHub(); fly("hub", () => { const t = new V3(0, 0.6, 0), p = new V3(3, isMobile() ? 38 : 25, isMobile() ? 44 : 30); shiftForPanel(t, p); return { target: t, pos: p }; }); }
   else if ((m = h.match(/^g([1-6])$/))) { focus.g = +m[1]; focus.key = null; panelIsland(+m[1]); fly(h, () => islandPose(+m[1])); speak(GRADES[m[1] - 1].name + "學習島"); }
   else if ((m = h.match(/^g([1-6])-([a-z]+)$/)) && subjectOf(m[2])) { if (panelMin()) setPanelMin(false, false); focus.g = +m[1]; focus.key = m[2]; panelSubject(+m[1], m[2]); fly(h, () => buildingPose(+m[1], m[2])); markVisited(h); }
   else if ((m = h.match(/^g([1-6])-([a-z]+)-(?:(\d+)-)?([A-Za-z0-9]+)$/)) && subjectOf(m[2])) {
@@ -3426,6 +3883,7 @@ function start() {
       '<a class="brand" href="#home">' + LOGO + '<span><small>JIALAN · JOYFUL LEARNING ISLAND</small><b>嘉蘭<em>樂學島</em></b></span></a>' +
       '<nav class="seg" id="gradeSeg" aria-label="選擇學習島"><button data-g="0" class="on">全島探索 <small>6</small></button>' + GRADES.map(g => '<button data-g="' + g.n + '" style="--g:' + g.color + '"><i></i>' + g.name + '</button>').join("") + '</nav>' +
       '<button class="icon-btn" id="listBtn" aria-label="學習島清單" title="學習島清單">' + ico("map") + '</button>' +
+      '<button class="icon-btn teacher-btn" id="teacherBtn" aria-label="老師專區" title="老師專區"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="15.5" r="1.4" fill="currentColor"/></svg><span>老師</span></button>' +
     '</header>' +
     '<section class="hero" aria-label="歡迎">' +
       '<p class="kicker">一 座 島 嶼 ， 一 扇 學 習 的 窗</p>' +
@@ -3442,7 +3900,7 @@ function start() {
     '<aside id="panel" class="panel-card" hidden></aside>' +
     '<button id="panelTab" class="panel-tab" type="button" aria-controls="panel" aria-expanded="true" title="收合卡片"><span class="pt-arrow" aria-hidden="true">›</span><span class="pt-label"></span></button>' +
     '<footer class="bar bar-bottom">' +
-      '<div class="foot-l"><span class="foot-ic">' + ico("book") + '</span><div class="foot-txt"><small>我的探索足跡</small><b><span id="footN">0</span><em> / <span id="footT">60</span></em></b></div><div class="foot-bar"><i id="footBar"></i></div><button class="foot-cert" id="certBtn" type="button" title="我的證書" aria-label="我的證書">🎓<b id="certN">0</b></button>' +
+      '<div class="foot-l"><span class="foot-ic">' + ico("book") + '</span><div class="foot-txt"><small>我的探索足跡</small><b><span id="footN">0</span><em> / <span id="footT">60</span></em></b></div><div class="foot-bar"><i id="footBar"></i></div><button class="foot-cert" id="certBtn" type="button" title="我的證書" aria-label="我的證書">🎓<b id="certN">0</b></button><button class="foot-cert" id="paperBtn" type="button" title="今日島報" aria-label="今日島報">📰</button>' +
         '<div class="foot-txt magpie"><small>台灣藍鵲</small><b id="birdCount">0 / 10</b></div></div>' +
       '<nav class="tools" aria-label="地圖工具">' +
         '<button class="tool wide vbtn on" data-view="pano">' + ico("home") + '<span>全景</span></button>' +
@@ -3465,7 +3923,9 @@ function start() {
   $("#heroQuote").addEventListener("click", () => setQuote(++quoteIdx));
   $all("#gradeSeg button").forEach(b => b.addEventListener("click", () => { stopTour(); const n = +b.getAttribute("data-g"); if (!n) { ui.view = "pano"; focus.flyKey = ""; } go(n ? "g" + n : "home"); }));
   $("#listBtn").addEventListener("click", () => go("list"));
+  $("#teacherBtn").addEventListener("click", () => go("teacher"));
   $("#certBtn").addEventListener("click", () => go("certs")); updateCertCount();
+  $("#paperBtn").addEventListener("click", () => openPaper(false));
   $("#guideBtn").addEventListener("click", () => go("guide"));
   lockPageScroll();
   $("#hostBtn").addEventListener("click", () => openNPC({ type: "host", name: HOST_NAME }));
@@ -3486,7 +3946,8 @@ function start() {
   document.addEventListener("pointerdown", e => { const p = $("#musicPop"); if (p && !p.hidden && !p.contains(e.target) && !e.target.closest("#musicBtn")) toggleMusicPop(false); });
   armMusicStart();
   $("#soundBtn").addEventListener("click", function () { ui.mute = !ui.mute; this.innerHTML = ico(ui.mute ? "mute" : "sound"); this.setAttribute("aria-label", "自動朗讀：" + (ui.mute ? "關" : "開")); this.classList.toggle("on", ui.mute); toast(ui.mute ? "自動朗讀已關閉（喇叭按鈕仍可使用）" : "自動朗讀已開啟"); if (ui.mute) stopSpeak(); });
-  $("#fullBtn").addEventListener("click", () => { try { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}); } catch (e) {} });
+  $("#fullBtn").addEventListener("click", toggleFullscreen);
+  ["fullscreenchange", "webkitfullscreenchange"].forEach(ev => document.addEventListener(ev, () => { const on = !!(document.fullscreenElement || document.webkitFullscreenElement); $("#fullBtn").classList.toggle("on", on); $("#fullBtn").setAttribute("aria-label", on ? "離開全螢幕" : "全螢幕"); }));
   $("#modal").addEventListener("click", e => { if (e.target.id === "modal") $(".m-close") && $(".m-close").click(); });
   addEventListener("keydown", e => { if (e.key === "Escape" && !$("#modal").hidden) $(".m-close").click(); });
   initLocalBooks();
@@ -3494,7 +3955,8 @@ function start() {
   if (!ok) document.body.classList.add("no-webgl");
   updateHint(); updateFootprints(); applyTime(); loadWeather();
   addEventListener("hashchange", route); route();
-  loadRegistry().then(() => { refreshOpenState(); if (location.hash === "#teacher") openTeacher(); });
+  loadRegistry().then(() => { refreshOpenState(); if (location.hash === "#teacher" && teacherUnlocked()) openTeacher(); });
+  maybeDailyPaper();
   if (!ok && !location.hash) go("list");
   else if (!store("guided") && (!location.hash || location.hash === "#home")) setTimeout(() => { if (!location.hash || location.hash === "#home") go("guide"); }, 1200);
   setInterval(() => { if (!override) applyTime(); }, 30000);
