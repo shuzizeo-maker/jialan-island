@@ -1920,6 +1920,8 @@ function addLabel(obj, offY, kind, data, onClick) {
 function labelMode(L) {
   if (L.kind === "npc") return (L.data.type === "host" ? focus.g === 0 : (focus.g === L.data.g && !FEST.npc)) ? "fixed" : "hide";
   if (L.kind === "fest") return (focus.g === 0 || focus.g === null) ? "fixed" : "hide";
+  if (L.kind === "station") return focus.g === 8 && !RIDE.on ? "fixed" : "hide";
+  if (L.kind === "train") return (focus.g === null || focus.g === 0 || focus.g === 8) && !RIDE.on && !(TR.now && TR.now.closed && focus.g !== 8) ? "fixed" : "hide";
   if (L.kind === "tool") return (focus.g === 7 || (focus.g === 0 && camera.position.distanceTo(HARBOR_POS) < 40)) ? "fixed" : "hide";
   if (L.kind !== "bld") return "fixed";
   if (focus.g === 0 || (focus.g && focus.g !== L.data.g)) return isOpen(L.data.g, L.data.key) ? "dot" : "hide";
@@ -1945,6 +1947,12 @@ function renderLabel(L, mode) {
     if (s) L.el.style.setProperty("--s", s.color);
     L.el.setAttribute("aria-label", host ? "島主" + d.name + "，點我問問題" : d.name + "，" + GRADES[d.g - 1].name + s.name + "助教");
     L.el.innerHTML = host ? '<i>主</i><span>島主．' + esc(d.name) + '</span>' : '<i>' + esc(s.name[0]) + '</i><span>' + esc(d.name) + '</span>';
+  } else if (L.kind === "station") {
+    L.el.className = "lbl npc station"; L.el.style.setProperty("--s", d.s.color);
+    L.el.innerHTML = '<i>🚉</i><span>' + esc(d.s.name) + '</span>'; L.el.setAttribute("aria-label", d.s.name);
+  } else if (L.kind === "train") {
+    L.el.className = "lbl npc train"; L.el.style.setProperty("--s", "#B5322A");
+    L.el.innerHTML = '<i>🚃</i><span>環島小火車</span>'; L.el.setAttribute("aria-label", "環島小火車，點我看即時動態");
   } else if (L.kind === "tool") {
     const t = d.t; L.el.className = "lbl bld full" + (t.url ? " open" : ""); L.el.style.setProperty("--s", d.color);
     L.el.setAttribute("aria-label", t.name + (t.url ? "" : "，建造中"));
@@ -1960,9 +1968,10 @@ function renderLabel(L, mode) {
 const _v = new V3();
 function updateLabels() {
   const W = innerWidth, H = innerHeight;
+  if (FW.active) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
   labels.forEach(L => {
     const m = labelMode(L); if (m !== L.mode) renderLabel(L, m);
-    let show = (ui.names || L.kind === "bld" || L.kind === "npc" || L.kind === "fest" || L.kind === "tool") && L.mode !== "hide";
+    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train"].includes(L.kind)) && L.mode !== "hide";
     if (L.kind === "grade" && L.data.g && focus.g === L.data.g && focus.key) show = false;
     if (!show) { L.el.style.visibility = "hidden"; return; }
     L.obj.getWorldPosition(_v); _v.y += L.offY; _v.project(camera);
@@ -1995,7 +2004,7 @@ function pickAt(cx, cy) {
   ray.setFromCamera(ptr, camera);
   const hits = ray.intersectObjects(pickables, false);
   if (!hits.length) return null;
-  const pri = ["npc", "host", "tool", "bird", "mascot", "building"];
+  const pri = ["npc", "host", "tool", "train", "bird", "mascot", "building"];
   for (const t of pri) { const h = hits.find(x => x.object.userData.type === t); if (h) return h.object.userData; }
   return hits[0].object.userData;
 }
@@ -2005,6 +2014,7 @@ function onPick(u) {
   if (u.type === "npc" || u.type === "host") return openNPC(u);
   if (u.type === "tool") return u.i >= 0 ? openTool(u.i) : go("tools");
   if (u.type === "tools") return go("tools");
+  if (u.type === "train") return go("train");
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2046,7 +2056,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2059,7 +2069,7 @@ function initWorld() {
   let last = performance.now(), time = 0;
   renderer.setAnimationLoop(() => {
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now; time += ui.paused ? 0 : dt;
-    stepTween(dt); controls.update();
+    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on) controls.update(); stepTrain(); stepRide();
     scene.children.forEach(o => { if (o.userData.follow) o.position.copy(camera.position); });
     if (sunMesh.userData.dir) sunMesh.position.copy(camera.position).addScaledVector(sunMesh.userData.dir, 600);
     if (moonSprite.userData.dir) moonSprite.position.copy(camera.position).addScaledVector(moonSprite.userData.dir, 580);
@@ -2105,7 +2115,7 @@ function initWorld() {
     clouds.forEach(c => { c.obj.visible = ui.fx; });
     if (!ui.paused) stepAmbient(dt, time);
     stepParticles(dt, time);
-    stepFest(dt); stepNPC(dt, time); stepLamp(dt);
+    stepFest(dt); stepNPC(dt, time); stepLamp(dt); stepMeteors(dt); stepFireworks(dt);
     renderer.render(scene, camera);
     updateLabels();
   });
@@ -2432,7 +2442,7 @@ function tabQuiz(p, L, pk) {
     const sayIt = () => speak(qs.length + "題答對" + score + "題。" + (stars === 3 ? "太厲害了！" : stars === 2 ? "做得很好！" : "繼續加油！") + (stars >= CERT_STARS ? "可以領取證書了！" : ""));
     if (stars >= CERT_STARS && !cheered) { cheered = true; stopSpeak(); const ms = playCheer(); confetti(); setTimeout(sayIt, ms); } else if (!cheered) sayIt();
     $("#again").addEventListener("click", () => { idx = 0; score = 0; cheered = false; qs = L.quiz.slice(); render(); });
-    if (stars >= CERT_STARS) { const rec = saveCert(pk, L, score, qs.length, stars); $("#getCert").addEventListener("click", () => certView(p, rec, finish)); }
+    if (stars >= CERT_STARS) { const hadCert = !!(store("certs") || {})[pk], rec = saveCert(pk, L, score, qs.length, stars); if (!hadCert) setTimeout(() => toast("🎆 拿到新證書，獲得 1 次放煙火的機會！點左下角的 🎆 就能放。"), 4200); $("#getCert").addEventListener("click", () => certView(p, rec, finish)); }
     $(".m-back", p).addEventListener("click", () => go(modalBack));
   }
   p.innerHTML = '<div class="result"><h2>挑戰關卡</h2><p>共 ' + qs.length + ' 題，全部用點的就可以作答。<br>答對 9 成以上可以得到 3 顆星！</p><button class="btn" id="start">開始挑戰</button></div>';
@@ -2491,6 +2501,7 @@ function openTeacher() {
   const tt = teacherTools();
   openModal('<div class="m-head"><h1>老師專區</h1><button class="m-close" aria-label="關閉">×</button></div>' +
     '<section class="t-sec"><h2>© 版權提醒</h2><p class="small">出版社同意教材供教師教學及學生學習使用，但著作權仍屬出版社。製作教材時請：① 在總表「建物登記」填好「版本」（翰林／南一／康軒／自編），網站會自動在每一課加上版權標示；② 只整理重點、生字和自編題目，不要上傳課本或習作的整份掃描檔。<a href="#copyright">看版權聲明</a></p></section>' +
+    '<section class="t-sec"><h2>🎆 示範用</h2><p class="small">上課展示時，可以免費試放煙火（不會扣學生的次數），或打開環島小火車的即時看板。</p><div class="row"><button class="btn ghost" id="tFw" type="button">試放煙火</button><button class="btn ghost" data-go="train" type="button">小火車即時動態</button></div></section>' +
     '<section class="t-sec"><h2>🗂 行政工具</h2><p class="small">只放在老師專區，學生在島上看不到。要新增工具，在總表的「工具登記」分頁加一列，「對象」選「老師」就好。</p>' +
     (tt.length ? '<div class="tool-list">' + tt.map(t => toolCard(t)).join("") + '</div>' : '<p class="small">目前還沒有登記行政工具。</p>') + '</section>' +
     '<section class="t-sec"><h2>預覽模式</h2><p class="small">打開後，總表或課次「上線」選「否」的內容也會顯示，方便上線前檢查。只影響這台裝置，關掉分頁就恢復。</p>' +
@@ -2508,6 +2519,8 @@ function openTeacher() {
     $("#passLine").textContent = '  teacherPassHash: "' + await passHash(v) + '",'; $("#passOut").hidden = false;
   });
   $("#copyPass").addEventListener("click", () => { try { navigator.clipboard.writeText($("#passLine").textContent.trim()); toast("已複製"); } catch (e) {} });
+  $("#tFw").addEventListener("click", () => { FW.teacherFree = true; openFireworks(); });
+  $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
   $("#lockBtn").addEventListener("click", () => { try { sessionStorage.removeItem("jialan:teacherOK"); localStorage.removeItem("jialan:teacherOK"); } catch (e) {} toast("老師專區已鎖上"); go("home"); });
   $("#pvMode").addEventListener("click", () => {
     previewMode = !previewMode; try { sessionStorage.setItem("jialan:preview", previewMode ? "1" : "0"); } catch (e) {}
@@ -2533,7 +2546,7 @@ function saveCert(pk, L, score, total, stars) {
   if (!old || score / total > old.score / old.total) { all[pk] = rec; store("certs", all); updateCertCount(); return rec; }
   return old;
 }
-function updateCertCount() { const n = Object.keys(store("certs") || {}).length, el = $("#certN"); if (el) el.textContent = n; }
+function updateCertCount() { const n = Object.keys(store("certs") || {}).length, el = $("#certN"); if (el) el.textContent = n; if (typeof updateFwCount === "function") updateFwCount(); }
 
 // Canvas 證書：A4 橫式，1754×1240（150 dpi）
 let certLogo = null;
@@ -3025,6 +3038,9 @@ const HOST_FAQ = [
   { q: "最近有什麼活動？", k: ["活動", "節慶", "聖誕", "過年", "春節", "節日", "派對", "操場"], a: "", act: ["看活動節目", "fest"] },
   { q: "工具港是什麼？", k: ["工具", "小幫手", "考卷", "訂正", "港"], a: "工具港在嘉蘭國小旁邊，走吊橋就能到。學校的學習小幫手（例如考卷訂正小幫手）都停在那裡，點建築物就能打開。", act: ["去工具港", "tools"] },
   { q: "老師專區在哪裡？", k: ["老師專區", "密語", "qr", "QR", "管理", "預覽"], a: "畫面右上角有一個鎖頭「老師」按鈕，輸入老師通關密語就能進入。QR Code、預覽模式和行政工具都在裡面。", act: ["打開老師專區", "teacher"] },
+  { q: "今晚有流星雨嗎？", k: ["流星", "星星", "天文", "許願"], a: "", act: ["", "meteor"] },
+  { q: "小火車怎麼搭？", k: ["火車", "小火車", "搭車", "車站", "坐車"], a: "環島小火車每天 06:00 到 22:00 繞著群島跑，停靠 8 個車站。點畫面上的「🚃 環島小火車」可以看即時動態，還能直接上車搭一圈！", act: ["看小火車即時動態", "train"] },
+  { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。點左下角的 🎆，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
   { q: "島報是什麼？", k: ["島報", "報紙", "新聞", "消息", "公告"], a: "每天第一次上島，島主會送來一份「嘉蘭樂學島島報」，有島上的活動、新開放的課和學習新聞。左下角的 📰 可以再看一次。", act: ["打開今日島報", "paper"] },
   { q: "大武山和太平洋？", k: ["大武山", "太平洋", "山", "海", "船", "火車", "飛魚"], a: "大武山和太平洋還沒開放探險，以後會有新的冒險！現在可以先欣賞海上的拼板舟、飛魚，還有山腳下經過的南迴線火車。" }
 ];
@@ -3046,9 +3062,10 @@ function openHost() {
   const reply = (f, asked) => {
     add("me", esc(asked));
     if (!f) { const a = "這個問題我還不太會回答，試試看下面的問題，或是問問老師喔！"; add("host", "<b>島主" + esc(HOST_NAME) + "</b>" + esc(a)); speak(a); return; }
+    if (!f.a && f.act && f.act[1] === "meteor") { const info = showerNow(); f = { q: f.q, a: (info.cur ? "有喔！" : "") + showerText(info) + (info.cur ? "天黑後、天氣晴朗時，抬頭就能看到流星劃過天空。" : "到時候晚上記得上島看看！") }; }
     if (!f.a && f.act && f.act[1] === "fest") { const st = festState(), e = st.cur || st.next; f = Object.assign({}, f, { a: e ? "最近的活動是「" + e.f.title + "」，" + festDateText(e) + "白天 9:00～16:00 在嘉蘭國小操場，" + festStatusText(st, e) + "。全島的助教都會到操場集合喔！" : "最近沒有安排活動。" }); }
     const m = add("host", "<b>島主" + esc(HOST_NAME) + "</b>" + esc(f.a) + (f.act ? '<br><button class="btn ghost sm" data-act="' + f.act[1] + '">' + esc(f.act[0]) + ' →</button>' : ""));
-    const b = $("[data-act]", m); if (b) b.addEventListener("click", () => { const v = b.getAttribute("data-act"); if (v === "lamp") { setLamp(true); closeModal(); go(modalBack); } else if (v === "fest") openFest(); else if (v === "paper") openPaper(false); else go(v); });
+    const b = $("[data-act]", m); if (b) b.addEventListener("click", () => { const v = b.getAttribute("data-act"); if (v === "lamp") { setLamp(true); closeModal(); go(modalBack); } else if (v === "fest") openFest(); else if (v === "fireworks") openFireworks(); else if (v === "paper") openPaper(false); else go(v); });
     speak(f.a);
   };
   $all("[data-faq]").forEach(b => b.addEventListener("click", () => { const f = HOST_FAQ[+b.getAttribute("data-faq")]; reply(f, f.q); }));
@@ -3340,6 +3357,9 @@ function openPaper(auto) {
         '<p>' + esc(e.f.greet) + '島主' + esc(HOST_NAME) + '邀請全島 60 位助教到操場集合，節目有' + esc(prog) + '，最後大家手牽手跳排灣族圓舞。</p>' +
         '<button class="btn ghost sm" id="paperFest">看活動節目 →</button></section>';
     }
+    // 天文消息：流星雨
+    const mi = showerNow(t);
+    if (mi.cur || (mi.next && mi.next.peak - st.today <= 7)) h += '<section class="ps"><span class="kicker">天文消息</span><h2>🌠 ' + esc((mi.cur || mi.next).s.name) + '</h2><p>' + esc(showerText(mi)) + '天黑後，樂學島的夜空也會出現流星喔！</p></section>';
     // 新開放的學習內容
     if (fresh.length) h += '<section class="ps"><span class="kicker">新開放</span><h2>學習島上新開放 ' + fresh.length + ' 課</h2><ul class="plist">' + fresh.slice(0, 6).map(l => '<li><button class="plink" data-go="' + l.k + '">' + esc(GRADES[l.g - 1].name + subjectOf(l.key).name + "．" + (l.it.no ? "第" + l.it.no + "課 " : "") + l.it.title) + ' →</button></li>').join("") + '</ul></section>';
     else if (!seen && lessons.length) h += '<section class="ps"><span class="kicker">目前開放</span><h2>現在可以學的課</h2><ul class="plist">' + lessons.slice(0, 6).map(l => '<li><button class="plink" data-go="' + l.k + '">' + esc(GRADES[l.g - 1].name + subjectOf(l.key).name + "．" + (l.it.no ? "第" + l.it.no + "課 " : "") + l.it.title) + ' →</button></li>').join("") + '</ul></section>';
@@ -3401,7 +3421,7 @@ function makeHarbor() {
   lh.add(part(cyl(0.28, 0.36, 1.6, 10), M("#FFFFFF"), 0, 0.8, 0)); lh.add(part(cyl(0.3, 0.3, 0.22, 10), M(soft("#C8423B")), 0, 1.0, 0));
   lh.add(part(cyl(0.22, 0.22, 0.32, 10), winMat, 0, 1.76, 0)); lh.add(part(cone(0.3, 0.32, 10), M(soft("#C8423B")), 0, 2.08, 0));
   const sb = signBoard("工具港", "#17607A", 2.2); sb.position.set(0.2, 0, 2.7); sb.rotation.y = yaw + Math.PI; root.add(sb);
-  [[2.8, -1.8, "pine", 1.0], [-3.0, -1.2, "a", 0.9]].forEach(t => { const tr = tree(t[2], t[3]); tr.position.set(t[0], 0, t[1]); root.add(tr); });
+  [[-1.7, 2.9, "pine", 0.9]].forEach(t => { const tr = tree(t[2], t[3]); tr.position.set(t[0], 0, t[1]); root.add(tr); });
   mergeStatic(root); root.position.copy(HARBOR_POS); scene.add(root);
   // 吊橋：嘉蘭國小 → 工具港
   const hb = new THREE.Group();
@@ -3415,7 +3435,7 @@ function buildToolHuts() {
   if (!webgl || !TOOLS.group) return;
   TOOLS.huts.forEach(h => { TOOLS.group.remove(h.g); const k = pickables.indexOf(h.hit); if (k >= 0) pickables.splice(k, 1); if (h.label) { h.label.el.remove(); labels.splice(labels.indexOf(h.label), 1); } });
   TOOLS.huts = [];
-  const list = studentTools().slice(0, 5), out = HARBOR_POS.clone().normalize(), base = Math.atan2(out.z, out.x) + Math.PI;
+  const list = studentTools().slice(0, 5), out = HARBOR_POS.clone().normalize(), base = Math.atan2(out.z, out.x) - Math.PI / 2;   // 避開環島小火車的高架軌道
   // 沒登記任何學生工具時，放一棟「建造中」的工具館
   const shown = list.length ? list : [{ name: "學習工具", desc: "", url: "", icon: "🧰", i: -1, placeholder: true }];
   shown.forEach((t, k) => {
@@ -3457,6 +3477,458 @@ function openTool(i) {
     '<div class="npc-bubble">' + esc(t.desc || "學校的學習小幫手。") + '</div>' +
     '<div class="row npc-act">' + (t.url ? '<a class="btn" href="' + esc(t.url) + '" target="_blank" rel="noopener">開啟' + esc(t.name) + ' ↗</a><span class="small">會在新分頁打開</span>' : '<span class="tc-soon">建造中，敬請期待</span>') + '</div></div>', "npc-sheet");
   speak(t.name + "。" + (t.desc || ""));
+}
+
+/* ===================== 流星雨：依真實的流星雨日期（極大期前後），晚上晴天才看得到 ===================== */
+const SHOWERS = [
+  { name: "象限儀座流星雨", m: 1, d: 4, w: 1.5, zhr: 110, rx: 0.78 },
+  { name: "天琴座流星雨", m: 4, d: 22, w: 2.5, zhr: 18, rx: 0.35 },
+  { name: "寶瓶座η流星雨", m: 5, d: 6, w: 5, zhr: 50, rx: 0.62 },
+  { name: "寶瓶座δ南流星雨", m: 7, d: 30, w: 7, zhr: 25, rx: 0.4 },
+  { name: "英仙座流星雨", m: 8, d: 12, w: 6, zhr: 100, rx: 0.7 },
+  { name: "天龍座流星雨", m: 10, d: 8, w: 1, zhr: 10, rx: 0.25 },
+  { name: "獵戶座流星雨", m: 10, d: 21, w: 5, zhr: 20, rx: 0.55 },
+  { name: "南金牛座流星雨", m: 11, d: 5, w: 10, zhr: 5, rx: 0.45, fireball: true },
+  { name: "北金牛座流星雨", m: 11, d: 12, w: 10, zhr: 5, rx: 0.5, fireball: true },
+  { name: "獅子座流星雨", m: 11, d: 17, w: 2.5, zhr: 15, rx: 0.66 },
+  { name: "雙子座流星雨", m: 12, d: 14, w: 3, zhr: 150, rx: 0.58 },
+  { name: "小熊座流星雨", m: 12, d: 22, w: 1.5, zhr: 10, rx: 0.3 }
+];
+function showerNow(t) {
+  // 找出目前最活躍（或最近即將到來）的流星雨
+  t = t || twNow(); const today = dayNo(t.y, t.m, t.d) + (t.h - 12) / 24;
+  let best = null, next = null;
+  SHOWERS.forEach(s => [t.y - 1, t.y, t.y + 1].forEach(y => {
+    const peak = dayNo(y, s.m, s.d), dd = today - peak, act = Math.exp(-2 * (dd / s.w) * (dd / s.w));
+    if (act > 0.12 && (!best || act * s.zhr > best.act * best.s.zhr)) best = { s, y, peak, dd, act };
+    if (peak > today && (!next || peak < next.peak)) next = { s, y, peak, dd };
+  }));
+  return { cur: best, next };
+}
+const moonIllum = () => (1 - Math.cos(2 * Math.PI * (S.moon || 0))) / 2;
+function showerText(info) {
+  const e = info.cur || info.next; if (!e) return "";
+  const d = new Date(e.peak * 864e5), md = (d.getUTCMonth() + 1) + "月" + d.getUTCDate() + "日";
+  const ill = moonIllum(), moonTxt = ill > 0.7 ? "月光很亮，只看得到比較亮的流星" : ill > 0.35 ? "月光有一點亮" : "月光很暗，很適合看流星";
+  if (info.cur) return e.s.name + "正在活躍（極大期 " + md + "，每小時最多約 " + e.s.zhr + " 顆）。天黑後到夜裡最好看，" + moonTxt + "。";
+  return "下一場是" + e.s.name + "，極大期在 " + md + "。";
+}
+const MET = { cv: null, x: null, list: [], acc: 0, toasted: false, dpr: 1 };
+function initMeteors() {
+  const cv = document.createElement("canvas"); cv.className = "meteor-cv"; cv.setAttribute("aria-hidden", "true");
+  $("#labels").parentNode.insertBefore(cv, $("#labels")); MET.cv = cv; MET.x = cv.getContext("2d");
+  const fit = () => { MET.dpr = Math.min(2, devicePixelRatio || 1); cv.width = innerWidth * MET.dpr; cv.height = innerHeight * MET.dpr; };
+  fit(); addEventListener("resize", fit);
+}
+const _hz = new V3();
+function skyLimitY() {
+  // 地平線（含大武山）在畫面上的高度：流星只畫在這條線以上
+  const f = new V3(); camera.getWorldDirection(f); f.y = 0; if (f.lengthSq() < 1e-6) return -1; f.normalize();
+  _hz.copy(camera.position).addScaledVector(f, 260); _hz.y = 70; _hz.project(camera);
+  if (_hz.z > 1) return -1; return (-_hz.y * 0.5 + 0.5) * innerHeight;
+}
+function stepMeteors(dt) {
+  if (!MET.x) return;
+  const x = MET.x, W = innerWidth, H = innerHeight; x.setTransform(MET.dpr, 0, 0, MET.dpr, 0, 0); x.clearRect(0, 0, W, H);
+  const info = showerNow(), sh = info.cur, wx = amb.kind, night = S.dark > 0.55 && wx !== "rain" && wx !== "storm" && !(FW && FW.active);
+  if (night && !ui.paused) {
+    let rate = 0.025 + (sh ? 0.3 * clamp(sh.s.zhr / 100, 0.15, 1.3) * sh.act : 0);
+    rate *= (1 - 0.5 * moonIllum()) * (wx === "cloudy" ? 0.45 : 1) * clamp((S.dark - 0.55) / 0.3, 0, 1);
+    MET.acc += rate * dt;
+    const lim = skyLimitY();
+    while (MET.acc > 1) {
+      MET.acc -= 1; if (lim < 70) continue;
+      const fire = sh && sh.s.fireball && Math.random() < 0.35, radiant = sh ? [W * sh.s.rx, -H * 0.08] : null;
+      let sx = Math.random() * W, sy = Math.random() * (lim - 30) * 0.8 + 10, dx, dy;
+      if (radiant) { dx = sx - radiant[0]; dy = sy - radiant[1]; } else { dx = Math.random() - 0.5; dy = 0.3 + Math.random() * 0.5; }
+      const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+      MET.list.push({ x: sx, y: sy, dx, dy, sp: (fire ? 260 : 420) + Math.random() * 300, len: (fire ? 160 : 70) + Math.random() * 90, t: 0, life: (fire ? 1.3 : 0.55) + Math.random() * 0.4, w: fire ? 3.2 : 1.2 + Math.random() * 0.9, fire, lim });
+    }
+    if (sh && !MET.toasted && sh.act > 0.3) {
+      MET.toasted = true; let seen = false; const key = sh.s.name + sh.y;
+      try { seen = sessionStorage.getItem("jialan:meteor") === key; sessionStorage.setItem("jialan:meteor", key); } catch (e) {}
+      if (!seen) setTimeout(() => toast("🌠 " + showerText(info) + "抬頭看看夜空！"), 3000);
+    }
+  }
+  MET.list = MET.list.filter(m => (m.t += dt) < m.life);
+  MET.list.forEach(m => {
+    const k = m.t / m.life, a = k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85;
+    const hx = m.x + m.dx * m.sp * m.t, hy = m.y + m.dy * m.sp * m.t, tl = Math.min(m.len, m.sp * m.t);
+    if (hy > m.lim) return;
+    const g = x.createLinearGradient(hx - m.dx * tl, hy - m.dy * tl, hx, hy);
+    g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(1, m.fire ? "rgba(255,226,170," + a + ")" : "rgba(235,245,255," + a + ")");
+    x.strokeStyle = g; x.lineWidth = m.w; x.lineCap = "round"; x.beginPath(); x.moveTo(hx - m.dx * tl, hy - m.dy * tl); x.lineTo(hx, hy); x.stroke();
+    if (m.fire) { x.fillStyle = "rgba(255,240,200," + a * 0.9 + ")"; x.beginPath(); x.arc(hx, hy, 2.6, 0, 7); x.fill(); }
+  });
+}
+
+/* ===================== 環島小火車：仿 YouBike 即時看板，依真實時間行駛（06:00–22:00） ===================== */
+const TR = { R: 18, Y: 3.0, V: 1.5, DWELL: 12, OPEN: 6 * 3600, CLOSE: 22 * 3600, st: [], seg: [], T: 0, hub: 0, cars: [], group: null, labels: [], label: null };
+function trainStations() {
+  const list = [{ key: "hub", name: "嘉蘭國小站", ang: 120, color: "#3E6B64", go: "hub" }, { key: "tools", name: "工具港站", ang: 60, color: "#17607A", go: "tools" }];
+  GRADES.forEach(g => list.push({ key: "g" + g.n, name: g.name + "站", ang: ANG[g.n - 1], color: g.color, go: "g" + g.n }));
+  return list.sort((a, b) => a.ang - b.ang);
+}
+function buildTrainSchedule() {
+  TR.st = trainStations(); TR.hub = TR.st.findIndex(s => s.key === "hub");
+  let t = 0; TR.seg = []; TR.arr = {};
+  for (let k = 0; k < TR.st.length; k++) {
+    const i = (TR.hub + k) % TR.st.length, j = (i + 1) % TR.st.length, a0 = TR.st[i].ang, da = ((TR.st[j].ang - a0) + 360) % 360;
+    TR.arr[i] = t; TR.seg.push({ type: "dwell", i, t0: t, t1: t + TR.DWELL, a0 }); t += TR.DWELL;
+    const dur = (da * Math.PI / 180 * TR.R) / TR.V; TR.seg.push({ type: "run", i, j, t0: t, t1: t + dur, a0, da }); t += dur;
+  }
+  TR.T = t;
+}
+let trOvKey = null, trOvBase = 0, trOvReal = 0;
+function trainSec() {
+  if (override) {
+    const t = twNow(), key = t.y + "-" + t.m + "-" + t.d + " " + t.h + ":" + t.mi;
+    if (key !== trOvKey) { trOvKey = key; trOvBase = t.h * 3600 + t.mi * 60; trOvReal = performance.now(); }
+    return trOvBase + (performance.now() - trOvReal) / 1000;
+  }
+  const d = new Date(Date.now() + 8 * 3600e3); return d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds() + d.getUTCMilliseconds() / 1000;
+}
+function trainState(sec) {
+  sec = sec == null ? trainSec() : sec;
+  if (sec < TR.OPEN || sec >= TR.CLOSE) return { closed: true, ang: TR.st[TR.hub].ang, at: TR.hub, sec };
+  const u = (sec - TR.OPEN) % TR.T, s = TR.seg.find(g => u >= g.t0 && u < g.t1) || TR.seg[0];
+  if (s.type === "dwell") return { ang: s.a0, at: s.i, left: s.t1 - u, u, sec };
+  const x = (u - s.t0) / (s.t1 - s.t0), e = (1 - Math.cos(Math.PI * x)) / 2;
+  return { ang: s.a0 + s.da * e, from: s.i, to: s.j, left: s.t1 - u, u, sec };
+}
+function nextArrival(i, st) {
+  // 回傳幾秒後到站；-1 表示正停在這一站
+  if (st.closed) return null;
+  if (st.at === i) return -1;
+  let d = TR.arr[i] - st.u; if (d < 0) d += TR.T;
+  return st.sec + d >= TR.CLOSE ? null : d;
+}
+const mmss = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+function makeTrainLine() {
+  buildTrainSchedule();
+  const g = new THREE.Group(), deck = M("#E9E2D2"), side = M("#B5322A"), rail = M("#6B6F75");
+  const ring = new THREE.RingGeometry(TR.R - 0.6, TR.R + 0.6, 160); ring.rotateX(-Math.PI / 2);
+  g.add(part(ring, deck, 0, TR.Y, 0));
+  [TR.R - 0.62, TR.R + 0.62].forEach(r => { const t = new THREE.TorusGeometry(r, 0.06, 4, 160); t.rotateX(Math.PI / 2); g.add(part(t, side, 0, TR.Y - 0.02, 0)); });
+  [TR.R - 0.22, TR.R + 0.22].forEach(r => { const t = new THREE.TorusGeometry(r, 0.035, 4, 160); t.rotateX(Math.PI / 2); g.add(part(t, rail, 0, TR.Y + 0.05, 0)); });
+  for (let a = 0; a < 360; a += 15) {
+    const t = a * Math.PI / 180, x = Math.cos(t) * TR.R, z = Math.sin(t) * TR.R;
+    if (TR.st.some(s => Math.abs(((a - s.ang + 540) % 360) - 180) < 4)) continue;
+    g.add(part(cyl(0.16, 0.22, TR.Y - SEA_Y, 8), M("#D8D2C4"), x, (TR.Y + SEA_Y) / 2, z));
+  }
+  // 車站：月臺、屋頂、站名
+  TR.st.forEach((s, k) => {
+    const t = s.ang * Math.PI / 180, out = new V3(Math.cos(t), 0, Math.sin(t)), p = out.clone().multiplyScalar(TR.R + 1.15), yaw = Math.atan2(out.x, out.z);
+    const sg = new THREE.Group(); sg.position.set(p.x, TR.Y, p.z); sg.rotation.y = yaw; g.add(sg);
+    sg.add(part(box(3.2, 0.22, 1.2), M("#F2EADA"), 0, -0.05, 0)); sg.add(part(box(3.2, 0.06, 0.12), M(s.color), 0, 0.08, -0.55));
+    [-1.3, 1.3].forEach(xx => sg.add(part(cyl(0.05, 0.05, 1.5, 6), M("#8A8F96"), xx, 0.75, 0.35)));
+    sg.add(part(box(3.4, 0.08, 1.0), M(soft(s.color)), 0, 1.52, 0.15));
+    sg.add(part(cyl(0.2, 0.26, TR.Y - SEA_Y, 8), M("#D8D2C4"), 0, -(TR.Y - SEA_Y) / 2, 0));
+    const an = new THREE.Object3D(); an.position.set(0, 2.2, 0); sg.add(an);
+    TR.labels.push(addLabel(an, 0, "station", { s, k }, () => go(s.go)));
+  });
+  mergeStatic(g); scene.add(g);
+  // 嘉蘭國小站的階梯
+  const hs = TR.st[TR.hub], th = hs.ang * Math.PI / 180, o = new V3(Math.cos(th), 0, Math.sin(th));
+  const stairs = new THREE.Group(); for (let i = 0; i < 10; i++) { const r = R_HUB - 0.3 + i * 0.32; stairs.add(part(box(1.0, 0.12, 0.34), M("#C9A577"), o.x * r, 0.1 + i * 0.3, o.z * r, 0, Math.atan2(o.x, o.z), 0)); }
+  mergeStatic(stairs); scene.add(stairs);
+  // 列車：三節車廂，車頭坐著台灣藍鵲
+  TR.group = new THREE.Group(); scene.add(TR.group);
+  const COLS = ["#F2C14E", "#8CB6D6", "#F2A9BE"];
+  for (let c = 0; c < 3; c++) {
+    const car = new THREE.Group();
+    car.add(part(box(0.95, 0.7, 1.55), M(COLS[c]), 0, 0.5, 0)); car.add(part(box(1.0, 0.08, 1.6), M("#FFFFFF"), 0, 0.9, 0));
+    car.add(part(box(0.97, 0.12, 1.57), M("#B5322A"), 0, 0.3, 0));
+    [-0.4, 0, 0.4].forEach(z => [-0.48, 0.48].forEach(xx => car.add(part(box(0.02, 0.24, 0.26), winMat, xx, 0.62, z))));
+    [-0.55, 0.55].forEach(z => [-0.42, 0.42].forEach(xx => car.add(part(cyl(0.11, 0.11, 0.08, 10), M("#333"), xx, 0.13, z, 0, 0, Math.PI / 2))));
+    if (c === 0) {
+      car.add(part(box(0.95, 0.5, 0.25), M(COLS[0]), 0, 0.42, 0.85)); const hl = glow("#FFF2C0", 0.9); hl.position.set(0, 0.45, 1.0); car.add(hl); car.userData.hl = hl;
+      const bird = blueMagpie(0.55); bird.position.set(0, 0.95, 0.2); bird.rotation.y = -Math.PI / 2; car.add(bird);
+      const hit = new THREE.Mesh(box(1.4, 1.4, 5.2), new THREE.MeshBasicMaterial({ visible: false })); hit.position.set(0, 0.6, -1.6); hit.userData = { pick: true, type: "train" }; car.add(hit); pickables.push(hit);
+      const an = new THREE.Object3D(); an.position.set(0, 1.9, 0); car.add(an); TR.label = addLabel(an, 0, "train", {}, () => go("train"));
+    }
+    TR.group.add(car); TR.cars.push(car);
+  }
+}
+function trainPose(ang, back = 0) {
+  const a = (ang * Math.PI / 180) - back / TR.R, p = new V3(Math.cos(a) * TR.R, TR.Y + 0.08, Math.sin(a) * TR.R), tan = new V3(-Math.sin(a), 0, Math.cos(a));
+  return { p, tan, a };
+}
+function stepTrain() {
+  if (!TR.cars.length) return;
+  const st = trainState(); TR.now = st;
+  TR.cars.forEach((c, i) => { const q = trainPose(st.ang, i * 1.7); c.position.copy(q.p); c.rotation.y = Math.atan2(q.tan.x, q.tan.z); });
+  const hl = TR.cars[0].userData.hl; if (hl) hl.visible = S.dark > 0.35 && !st.closed;
+}
+// 搭車：鏡頭跟著列車
+const RIDE = { on: false, lastAt: -1 };
+function startRide() {
+  if (!TR.now || TR.now.closed) { toast("小火車今天已經收班了，明天早上 6:00 首班車。"); return; }
+  stopTour(); closeModal(); if (!panelMin()) setPanelMin(true, false);
+  RIDE.on = true; RIDE.lastAt = TR.now.at; tween.active = false; controls.enabled = false;
+  let chip = $("#rideChip"); if (!chip) { chip = document.createElement("div"); chip.id = "rideChip"; chip.className = "ride-chip"; $("#app").appendChild(chip); }
+  chip.hidden = false; trainHorn(); speak("歡迎搭乘樂學島環島小火車！");
+}
+function endRide() {
+  if (!RIDE.on) return; RIDE.on = false; controls.enabled = true;
+  const c = $("#rideChip"); if (c) c.hidden = true;
+  const st = TR.now, k = st.at != null ? st.at : st.to; toast("下車囉！這裡是" + TR.st[k].name + "。");
+  focus.flyKey = ""; go(TR.st[k].go);
+}
+const _rp = new V3();
+function stepRide() {
+  if (!RIDE.on || !TR.now) return;
+  const st = TR.now; if (st.closed) { endRide(); return; }
+  const q = trainPose(st.ang);
+  camera.position.copy(q.p).addScaledVector(q.tan, -3.4).add(_rp.set(0, 1.9, 0)).addScaledVector(new V3(Math.cos(q.a), 0, Math.sin(q.a)), 0.6);
+  controls.target.copy(q.p).addScaledVector(q.tan, 7).add(_rp.set(0, 0.4, 0));
+  camera.lookAt(controls.target);
+  const chip = $("#rideChip");
+  if (chip) {
+    const nxt = st.at != null ? (st.at + 1) % TR.st.length : st.to;
+    const txt = st.at != null ? "停靠 <b>" + TR.st[st.at].name + "</b>，" + Math.ceil(st.left) + " 秒後開車" : "下一站 <b>" + TR.st[nxt].name + "</b>，約 " + Math.ceil(st.left) + " 秒";
+    if (chip.dataset.t !== txt) { chip.dataset.t = txt; chip.innerHTML = '<span>🚃 乘車中．' + txt + '</span><button class="btn sm" id="rideOff">下車</button>'; $("#rideOff").addEventListener("click", endRide); }
+  }
+  if (st.at != null && st.at !== RIDE.lastAt) { RIDE.lastAt = st.at; trainHorn(); speak(TR.st[st.at].name + "到了。"); }
+  if (st.at == null) RIDE.lastAt = -1;
+}
+function trainHorn() {
+  const ctx = sfxAudio(); if (!ctx) return; const t = ctx.currentTime + 0.02, out = ctx.createGain(); out.gain.value = 0.25; out.connect(ctx.destination);
+  [[659, 0], [523, 0.28]].forEach(([f, dt]) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = "triangle"; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t + dt); g.gain.linearRampToValueAtTime(0.3, t + dt + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.26); o.connect(g); g.connect(out); o.start(t + dt); o.stop(t + dt + 0.3); });
+}
+function trainBoardHTML() {
+  const st = TR.now || trainState(), cyc = mmss(TR.T);
+  let pos;
+  if (st.closed) pos = "今日已收班，列車停在嘉蘭國小站。明天 06:00 首班車。";
+  else if (st.at != null) pos = "停靠 <b>" + TR.st[st.at].name + "</b>，" + Math.ceil(st.left) + " 秒後開車";
+  else pos = "行駛中：" + TR.st[st.from].name + " → <b>" + TR.st[st.to].name + "</b>（約 " + Math.ceil(st.left) + " 秒到站）";
+  // 環狀路線圖
+  const svgR = 62, dot = a => [80 + Math.cos(a * Math.PI / 180) * svgR, 80 + Math.sin(a * Math.PI / 180) * svgR];
+  const tp = dot(st.ang);
+  const svg = '<svg viewBox="0 0 160 160" class="tr-map" aria-hidden="true"><circle cx="80" cy="80" r="' + svgR + '" fill="none" stroke="#D5CCB8" stroke-width="6"/>' +
+    TR.st.map(s => { const p = dot(s.ang); return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="6" fill="#fff" stroke="' + s.color + '" stroke-width="3"/>'; }).join("") +
+    '<circle cx="80" cy="80" r="16" fill="#3E6B64"/><text x="80" y="84" text-anchor="middle" font-size="10" fill="#fff">嘉蘭</text>' +
+    (st.closed ? "" : '<circle cx="' + tp[0].toFixed(1) + '" cy="' + tp[1].toFixed(1) + '" r="8" fill="#F2C14E" stroke="#B5322A" stroke-width="2"/><text x="' + tp[0].toFixed(1) + '" y="' + (tp[1] + 4).toFixed(1) + '" text-anchor="middle" font-size="9">🚃</text>') + '</svg>';
+  const rows = TR.st.map((s, i) => {
+    const n = nextArrival(i, st), soon = n != null && n >= 0 && n < 25;
+    const badge = n === -1 ? '<span class="tr-pill in">進站中</span>' : n == null ? '<span class="tr-pill off">06:00 首班</span>' : soon ? '<span class="tr-pill soon">即將進站</span>' : '<span class="tr-pill">' + mmss(n) + '</span>';
+    return '<button class="tr-row' + (n === -1 ? " here" : soon ? " soon" : "") + '" data-go="' + s.go + '"><i style="background:' + s.color + '"></i><b>' + esc(s.name) + '</b>' + badge + '</button>';
+  }).join("");
+  const now = new Date(Date.now() + 8 * 3600e3);
+  return '<div class="tr-head">' + svg + '<div><p class="tr-pos">' + pos + '</p><p class="small">每 ' + cyc + ' 一班．營運時間 06:00–22:00．每站停 ' + TR.DWELL + ' 秒<br>更新時間 ' + String(now.getUTCHours()).padStart(2, "0") + ":" + String(now.getUTCMinutes()).padStart(2, "0") + ":" + String(now.getUTCSeconds()).padStart(2, "0") + '</p></div></div>' +
+    '<div class="tr-rows">' + rows + '</div>';
+}
+function panelTrain(quiet) {
+  openPanel('<div class="p-top"><span class="crumb">嘉蘭樂學島</span><button class="p-close" aria-label="關閉">×</button></div>' +
+    '<h2 style="--c:#B5322A"><i class="dot"></i>🚃 環島小火車．即時動態</h2><p class="p-lede">小火車繞著群島走一圈，停靠 8 個車站。看看下一班什麼時候到，也可以直接上車！</p>' +
+    '<div id="trainBoard">' + trainBoardHTML() + '</div>' +
+    '<div class="row" style="margin-top:12px"><button class="btn" id="rideBtn">🎢 上車搭一圈</button></div>', "subject");
+  $("#rideBtn").addEventListener("click", startRide);
+  const bind = () => $all("#trainBoard [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
+  bind();
+  clearInterval(TR.timer); TR.timer = setInterval(() => { const b = $("#trainBoard"); if (!b || focus.g !== 8) { clearInterval(TR.timer); return; } b.innerHTML = trainBoardHTML(); bind(); }, 1000);
+  if (!quiet) speak("環島小火車即時動態。");
+}
+function trainViewPose() { const t = new V3(0, 0, 4), p = new V3(0, isMobile() ? 62 : 46, isMobile() ? 64 : 50); shiftForPanel(t, p); return { target: t, pos: p }; }
+
+/* ===================== 煙火：每張學習證書可以放一次，仿世界知名煙火節 ===================== */
+const FW_N = 9000;
+const FW = { active: false, pts: null, refl: null, t: 0, events: [], rockets: [], emitters: [], ptr: 0, light: null, show: null, free: false };
+const FW_COL = { gold: [1, 0.78, 0.32], red: [1, 0.28, 0.22], green: [0.35, 1, 0.45], blue: [0.3, 0.62, 1], purple: [0.78, 0.42, 1], white: [1, 1, 1], silver: [0.85, 0.9, 1], orange: [1, 0.55, 0.15], pink: [1, 0.45, 0.72], cyan: [0.4, 1, 0.95] };
+const FW_SHOWS = {
+  sydney: { name: "雪梨跨年風", icon: "🌉", desc: "雪梨港灣大橋的跨年煙火：大橋上流下金色瀑布，接著滿天的彩色牡丹和連發的壓軸。", pose: () => ({ target: new V3(0, 22, 0), pos: new V3(0, 14, isMobile() ? 108 : 86) }) },
+  sumida: { name: "日本隅田川花火風", icon: "🎐", desc: "日本夏日花火大會的傳統工藝：又圓又大的菊花、雙層牡丹、金色垂柳，最後是「Star Mine」連發。", pose: () => ({ target: new V3(0, 24, 0), pos: new V3(0, 14, isMobile() ? 108 : 86) }) },
+  penghu: { name: "澎湖海上花火風", icon: "🌊", desc: "臺灣澎湖國際海上花火節：煙火在海面上綻放，水面映出倒影，還有愛心和水上扇形煙火。", pose: () => ({ target: new V3(0, 12, 56), pos: new V3(0, 9, isMobile() ? 130 : 112) }) },
+  dubai: { name: "杜拜跨年風", icon: "🏙", desc: "杜拜哈里發塔跨年秀：高塔從下到上噴出金色火花，再接金色光環和閃爍的星雨。", pose: () => ({ target: new V3(0, 22, 0), pos: new V3(0, 14, isMobile() ? 108 : 86) }) }
+};
+const fwTokens = () => { const n = Object.keys(store("certs") || {}).length, u = (store("fw") || {}).used || 0; return Math.max(0, n - u); };
+function updateFwCount() { const el = $("#fwN"); if (el) el.textContent = fwTokens(); }
+function initFireworks() {
+  const geo = new THREE.BufferGeometry();
+  const P = new Float32Array(FW_N * 3), C = new Float32Array(FW_N * 3), SZ = new Float32Array(FW_N), A = new Float32Array(FW_N);
+  geo.setAttribute("position", new THREE.BufferAttribute(P, 3)); geo.setAttribute("aColor", new THREE.BufferAttribute(C, 3));
+  geo.setAttribute("aSize", new THREE.BufferAttribute(SZ, 1)); geo.setAttribute("aAlpha", new THREE.BufferAttribute(A, 1));
+  geo.boundingSphere = new THREE.Sphere(new V3(0, 0, 0), 1e4);
+  const mk = refl => new THREE.ShaderMaterial({
+    uniforms: { uScale: { value: innerHeight * 3.2 }, uRefl: { value: refl ? 1 : 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: "attribute vec3 aColor; attribute float aSize; attribute float aAlpha; uniform float uScale; uniform float uRefl; varying vec3 vC; varying float vA;" +
+      "void main(){ vC=aColor; vA=aAlpha; if(uRefl>0.5){ vA*= length(position.xz)>48.0 ? 0.32 : 0.0; } vec4 mv=modelViewMatrix*vec4(position,1.0); gl_PointSize=max(1.0,aSize*uScale/-mv.z); gl_Position=projectionMatrix*mv; }",
+    fragmentShader: "varying vec3 vC; varying float vA; void main(){ vec2 d=gl_PointCoord-0.5; float r=length(d); if(r>0.5) discard; float a=smoothstep(0.5,0.05,r); float core=smoothstep(0.2,0.0,r); gl_FragColor=vec4(min(vec3(1.0),vC*(0.8+core*0.9)), (a*0.75+core*0.5)*vA); }"
+  });
+  FW.pts = new THREE.Points(geo, mk(false)); FW.pts.frustumCulled = false;
+  FW.refl = new THREE.Points(geo, mk(true)); FW.refl.frustumCulled = false; FW.refl.scale.y = -1; FW.refl.position.y = 2 * SEA_Y;
+  FW.V = new Float32Array(FW_N * 3); FW.L = new Float32Array(FW_N); FW.ML = new Float32Array(FW_N); FW.D = new Float32Array(FW_N); FW.G = new Float32Array(FW_N); FW.F = new Uint8Array(FW_N); FW.S0 = new Float32Array(FW_N); FW.TR = new Float32Array(FW_N);
+  FW.light = new THREE.PointLight("#FFD9A0", 0, 120, 1.6); scene.add(FW.light);
+  scene.add(FW.pts); scene.add(FW.refl); FW.pts.visible = FW.refl.visible = false;
+  addEventListener("resize", () => { FW.pts.material.uniforms.uScale.value = FW.refl.material.uniforms.uScale.value = innerHeight * 3.2; });
+}
+function fwAdd(p, v, col, o) {
+  // o: { life, size, drag, g, flag: 1 拖尾 2 閃爍 4 分裂 }
+  const i = FW.ptr; FW.ptr = (FW.ptr + 1) % FW_N;
+  const P = FW.pts.geometry.attributes.position.array, C = FW.pts.geometry.attributes.aColor.array, SZ = FW.pts.geometry.attributes.aSize.array;
+  P[i * 3] = p.x; P[i * 3 + 1] = p.y; P[i * 3 + 2] = p.z; FW.V[i * 3] = v.x; FW.V[i * 3 + 1] = v.y; FW.V[i * 3 + 2] = v.z;
+  C[i * 3] = col[0]; C[i * 3 + 1] = col[1]; C[i * 3 + 2] = col[2];
+  FW.L[i] = FW.ML[i] = o.life || 1.8; SZ[i] = FW.S0[i] = o.size || 0.55; FW.D[i] = o.drag == null ? 0.975 : o.drag; FW.G[i] = o.g == null ? 3.2 : o.g; FW.F[i] = o.flag || 0; FW.TR[i] = 0;
+  return i;
+}
+const _fv = new V3(), _fp = new V3();
+const rndDir = () => { const u = Math.random() * 2 - 1, t = Math.random() * Math.PI * 2, s = Math.sqrt(1 - u * u); return _fv.set(s * Math.cos(t), u, s * Math.sin(t)); };
+const fwC = k => FW_COL[k] || FW_COL.gold;
+function fwBurst(type, pos, c1, c2) {
+  const p = pos.clone(), col = fwC(c1), col2 = fwC(c2 || c1);
+  fwFlash(p, type === "salute" ? 3 : 1.4); fwBoom(type, p);
+  const sphere = (n, sp, o, cl) => { for (let k = 0; k < n; k++) { const d = rndDir(); fwAdd(p, d.multiplyScalar(sp * (0.92 + Math.random() * 0.12)), cl, o); } };
+  switch (type) {
+    case "peony": sphere(150, 11, { life: 1.9 }, col); sphere(40, 5, { life: 1.4, size: 0.5 }, col2); break;
+    case "kiku": sphere(170, 12, { life: 2.2, flag: 1, size: 0.5 }, col); sphere(50, 5.5, { life: 1.6 }, col2); break;
+    case "double": sphere(140, 12, { life: 2.1 }, col); sphere(90, 7, { life: 1.9 }, col2); break;
+    case "willow": sphere(120, 8, { life: 4.2, drag: 0.955, g: 1.3, flag: 1, size: 0.5 }, fwC("gold")); break;
+    case "ring": { const n = 100, ax = rndDir().clone(), b1 = new V3(1, 0, 0).cross(ax).normalize(), b2 = ax.clone().cross(b1); for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2; fwAdd(p, b1.clone().multiplyScalar(Math.cos(a) * 11).addScaledVector(b2, Math.sin(a) * 11), col, { life: 1.8 }); } sphere(25, 3, { life: 1.2 }, col2); break; }
+    case "heart": { const f = new V3(), up = new V3(0, 1, 0); camera.getWorldDirection(f); const rt = f.clone().cross(up).normalize(); for (let k = 0; k < 120; k++) { const t = k / 120 * Math.PI * 2, hx = 16 * Math.pow(Math.sin(t), 3), hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t); fwAdd(p, rt.clone().multiplyScalar(hx * 0.62).addScaledVector(up, hy * 0.62), col, { life: 2.0, drag: 0.96, g: 1.2 }); } break; }
+    case "palm": for (let k = 0; k < 9; k++) { const a = k / 9 * Math.PI * 2; fwAdd(p, _fv.set(Math.cos(a) * 9, 7 + Math.random() * 2, Math.sin(a) * 9), col, { life: 2.6, flag: 1, size: 0.9, drag: 0.97, g: 4 }); } break;
+    case "crossette": for (let k = 0; k < 14; k++) { const d = rndDir(); fwAdd(p, d.multiplyScalar(10), col, { life: 0.75, flag: 4, size: 0.7 }); } break;
+    case "strobe": sphere(130, 9, { life: 2.6, flag: 2, size: 0.45, g: 2 }, fwC("silver")); break;
+    case "salute": sphere(60, 14, { life: 0.5, size: 0.9 }, fwC("white")); break;
+    case "fan": for (let k = 0; k < 60; k++) { const a = (k / 60 - 0.5) * 2.2; fwAdd(p, _fv.set(Math.sin(a) * 13, Math.cos(a) * 15, (Math.random() - 0.5) * 2), col, { life: 1.7, g: 9, flag: 1 }); } break;
+  }
+}
+function fwRocket(type, at, c1, c2, quiet) {
+  const y0 = at.y > 18 ? 0 : SEA_Y, start = new V3(at.x + (Math.random() - 0.5) * 2, y0, at.z), tt = 1.25 + Math.random() * 0.3, g = 5;
+  const v = new V3((at.x - start.x) / tt, (at.y - y0) / tt + 0.5 * g * tt, 0);
+  FW.rockets.push({ p: start, v, g, t: 0, tt, type, at: at.clone(), c1, c2 });
+  if (!quiet) fwWhistle();
+}
+function fwEmitter(fn, dur, rate) { FW.emitters.push({ fn, dur, rate, t: 0, acc: 0 }); }
+// 幾種節目
+const fwR = (a, b) => a + Math.random() * (b - a);
+const spot = (cx = 0, cz = -2, sx = 26, h0 = 24, h1 = 42) => new V3(cx + fwR(-sx, sx), fwR(h0, h1), cz + fwR(-8, 8));
+const PAL = ["red", "green", "blue", "purple", "gold", "pink", "cyan", "orange", "white"];
+const pc = () => PAL[Math.floor(Math.random() * PAL.length)];
+function buildShow(key) {
+  const ev = [], at = (t, fn) => ev.push({ t, fn });
+  if (key === "sydney") {
+    [0, 0.4, 0.8].forEach((t, i) => at(t, () => fwRocket("salute", new V3((i - 1) * 18, 34, -2), "white")));
+    at(1.5, () => fwEmitter(() => { const x = fwR(-32, 32); fwAdd(_fp.set(x, 12, 8), _fv.set(fwR(-0.3, 0.3), fwR(-1, 0), fwR(-0.3, 0.3)), fwC("gold"), { life: fwR(1.4, 2.2), g: 5, drag: 0.98, size: 0.45, flag: Math.random() < 0.3 ? 2 : 0 }); }, 9, 260));
+    for (let k = 0; k < 10; k++) at(2 + k * 0.9, () => fwRocket(Math.random() < 0.3 ? "double" : "peony", spot(), pc(), pc()));
+    at(12, () => fwRocket("crossette", spot(-14), "gold")); at(12.6, () => fwRocket("crossette", spot(14), "silver"));
+    for (let k = 0; k < 6; k++) at(14 + k * 0.7, () => fwRocket("ring", spot(), pc(), "gold"));
+    for (let k = 0; k < 26; k++) at(19 + k * 0.22, () => fwRocket(["peony", "kiku", "strobe", "willow"][k % 4], spot(0, -2, 30), pc(), pc(), k % 3));
+    at(25.5, () => fwRocket("willow", new V3(0, 40, -2), "gold"));
+  } else if (key === "sumida") {
+    const big = [["kiku", "red", "gold"], ["double", "blue", "white"], ["kiku", "green", "orange"], ["willow", "gold"], ["double", "pink", "cyan"], ["kiku", "purple", "gold"], ["willow", "gold"]];
+    big.forEach((b, k) => at(0.3 + k * 2.4, () => fwRocket(b[0], new V3(fwR(-12, 12), fwR(32, 40), -2), b[1], b[2])));
+    for (let k = 0; k < 4; k++) at(17.5 + k * 0.6, () => fwRocket("palm", spot(0, -2, 20, 26, 34), pc()));
+    for (let k = 0; k < 36; k++) at(20.5 + k * 0.12, () => fwRocket(k % 2 ? "peony" : "kiku", spot(0, -2, 28, 18, 32), pc(), pc(), k % 4));
+    at(25.5, () => fwRocket("willow", new V3(-10, 38, -2), "gold")); at(25.8, () => fwRocket("willow", new V3(10, 38, -2), "gold"));
+  } else if (key === "penghu") {
+    const sea = (h0 = 12, h1 = 24, sx = 26) => new V3(fwR(-sx, sx), fwR(h0, h1), 56 + fwR(-4, 4));
+    at(0, () => fwEmitter(() => { const x = fwR(-28, 28); fwAdd(_fp.set(x, SEA_Y + 0.2, 56), _fv.set(fwR(-1.5, 1.5), fwR(9, 13), 0), fwC(Math.random() < 0.5 ? "gold" : "cyan"), { life: 1.6, g: 9, size: 0.45 }); }, 5, 160));
+    for (let k = 0; k < 5; k++) at(1 + k * 1.4, () => fwRocket("peony", sea(), pc(), pc()));
+    [9, 11].forEach((t, i) => at(t, () => fwRocket("heart", new V3((i ? 1 : -1) * 10, 18, 56), i ? "pink" : "red")));
+    for (let k = 0; k < 6; k++) at(13 + k * 0.5, () => fwBurst("fan", new V3(fwR(-26, 26), SEA_Y + 0.4, 56), pc()));
+    for (let k = 0; k < 5; k++) at(16.5 + k * 0.8, () => fwRocket("ring", sea(16, 26), pc(), "white"));
+    for (let k = 0; k < 24; k++) at(21 + k * 0.2, () => fwRocket(["peony", "strobe", "kiku"][k % 3], sea(10, 26, 30), pc(), pc(), k % 3));
+    at(26, () => fwRocket("heart", new V3(0, 20, 56), "pink"));
+  } else {   // dubai
+    const tower = new V3(-2, 0, -6);
+    at(0, () => fwEmitter(() => { const y = fwR(2, 42), side = Math.random() < 0.5 ? -1 : 1; fwAdd(_fp.set(tower.x + side * 0.6, y, tower.z), _fv.set(side * fwR(2, 6), fwR(-0.5, 2), fwR(-2, 2)), fwC(Math.random() < 0.7 ? "gold" : "white"), { life: fwR(1.2, 2.2), g: 4, size: 0.4, flag: Math.random() < 0.25 ? 2 : 0 }); }, 10, 380));
+    for (let k = 0; k < 8; k++) at(1 + k * 1.1, () => fwRocket(k % 2 ? "ring" : "peony", spot(0, -4, 24, 30, 44), "gold", "white"));
+    for (let k = 0; k < 6; k++) at(11 + k * 0.6, () => fwRocket("strobe", spot(0, -4, 26, 30, 44), "silver"));
+    at(15, () => fwEmitter(() => { const x = fwR(-30, 30); fwAdd(_fp.set(x, 46, -4), _fv.set(0, fwR(-2, 0), 0), fwC("gold"), { life: fwR(2, 3), g: 3.5, drag: 0.985, size: 0.45, flag: 2 }); }, 6, 300));
+    for (let k = 0; k < 22; k++) at(18 + k * 0.25, () => fwRocket(["willow", "ring", "kiku"][k % 3], spot(0, -4, 30, 26, 44), "gold", k % 2 ? "white" : "orange", k % 3));
+    at(25.5, () => fwRocket("salute", new V3(0, 40, -4), "white"));
+  }
+  return ev.sort((a, b) => a.t - b.t);
+}
+function stepFireworks(dt) {
+  if (!FW.pts) return;
+  const live = FW.active || FW.rockets.length || FW.emitters.length || FW.alive;
+  if (!live) return;
+  if (FW.active) { FW.t += dt; while (FW.events.length && FW.events[0].t <= FW.t) FW.events.shift().fn(); if (!FW.events.length && !FW.rockets.length && !FW.emitters.length && FW.t > FW.end) endFireworks(); }
+  // 火箭
+  FW.rockets = FW.rockets.filter(r => {
+    r.t += dt; r.v.y -= r.g * dt; r.p.addScaledVector(r.v, dt);
+    fwAdd(r.p, _fv.set(fwR(-0.4, 0.4), fwR(-1.2, -0.3), fwR(-0.4, 0.4)), [1, 0.7, 0.35], { life: 0.5, size: 0.35, g: 1 });
+    if (r.t >= r.tt) { fwBurst(r.type, r.at, r.c1, r.c2); return false; } return true;
+  });
+  FW.emitters = FW.emitters.filter(e => { e.t += dt; e.acc += e.rate * dt; while (e.acc > 1) { e.acc -= 1; e.fn(); } return e.t < e.dur; });
+  // 火花
+  const G = FW.pts.geometry.attributes, P = G.position.array, A = G.aAlpha.array, SZ = G.aSize.array, k60 = dt * 60, tnow = performance.now() / 1000;
+  let alive = 0;
+  for (let i = 0; i < FW_N; i++) {
+    if (FW.L[i] <= 0) { if (A[i] !== 0) { A[i] = 0; SZ[i] = 0; } continue; }
+    alive++;
+    FW.L[i] -= dt; const dr = Math.pow(FW.D[i], k60), j = i * 3;
+    FW.V[j] *= dr; FW.V[j + 1] = FW.V[j + 1] * dr - FW.G[i] * dt; FW.V[j + 2] *= dr;
+    P[j] += FW.V[j] * dt; P[j + 1] += FW.V[j + 1] * dt; P[j + 2] += FW.V[j + 2] * dt;
+    const k = FW.L[i] / FW.ML[i]; let a = k < 0.35 ? k / 0.35 : 1;
+    const fl = FW.F[i];
+    if (fl & 2) a *= Math.sin(tnow * 38 + i) > 0.2 ? 1 : 0.1;
+    if (fl & 1 && (FW.TR[i] -= dt) <= 0 && k > 0.15) { FW.TR[i] = 0.09; const c = G.aColor.array; fwAdd(_fp.set(P[j], P[j + 1], P[j + 2]), _fv.set(0, -0.3, 0), [c[j] * 0.8, c[j + 1] * 0.6, c[j + 2] * 0.4], { life: 0.45, size: SZ[i] * 0.55, g: 0.6, drag: 0.9 }); }
+    if (fl & 4 && FW.L[i] <= 0) { const c = G.aColor.array, col = [c[j], c[j + 1], c[j + 2]]; for (let q = 0; q < 4; q++) { const d = rndDir(); fwAdd(_fp.set(P[j], P[j + 1], P[j + 2]), d.multiplyScalar(6), col, { life: 1.1, size: 0.45, flag: 1 }); } }
+    A[i] = Math.max(0, a); SZ[i] = FW.S0[i] * (0.6 + 0.4 * a);
+  }
+  FW.alive = alive;
+  G.position.needsUpdate = G.aAlpha.needsUpdate = G.aSize.needsUpdate = G.aColor.needsUpdate = true;
+  FW.light.intensity = Math.max(0, FW.light.intensity - dt * 30);
+  const vis = alive > 0 || FW.active; FW.pts.visible = vis; FW.refl.visible = vis;
+}
+function fwFlash(p, k) { FW.light.position.copy(p); FW.light.intensity = 40 * k * (S.dark > 0.4 ? 1 : 0.3); }
+// 聲音：發射的咻聲、爆炸的轟聲、劈啪聲
+function fwWhistle() {
+  const ctx = sfxAudio(); if (!ctx) return; const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = "sine"; o.frequency.setValueAtTime(500, t); o.frequency.exponentialRampToValueAtTime(1500, t + 1.1);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.035, t + 0.1); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+  o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 1.25);
+}
+let fwNoise = null;
+function fwBoom(type, p) {
+  const ctx = sfxAudio(); if (!ctx) return;
+  if (!fwNoise) { fwNoise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate); const d = fwNoise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+  const dist = camera.position.distanceTo(p), t = ctx.currentTime + Math.min(0.5, dist / 340), vol = clamp(70 / dist, 0.25, 1) * (type === "salute" ? 1.3 : 1);
+  const src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+  src.buffer = fwNoise; lp.type = "lowpass"; lp.frequency.setValueAtTime(900, t); lp.frequency.exponentialRampToValueAtTime(120, t + 1.2);
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.5 * vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+  src.connect(lp); lp.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + 1.6);
+  const o = ctx.createOscillator(), og = ctx.createGain(); o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.4);
+  og.gain.setValueAtTime(0.45 * vol, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.5); o.connect(og); og.connect(ctx.destination); o.start(t); o.stop(t + 0.55);
+  if (type === "kiku" || type === "strobe" || type === "willow") {   // 劈啪
+    for (let k = 0; k < 18; k++) { const tt = t + 0.6 + Math.random() * 1.6, s = ctx.createBufferSource(), hg = ctx.createGain(), hp = ctx.createBiquadFilter(); s.buffer = fwNoise; hp.type = "highpass"; hp.frequency.value = 3000; hg.gain.setValueAtTime(0.08 * vol, tt); hg.gain.exponentialRampToValueAtTime(0.0001, tt + 0.03); s.connect(hp); hp.connect(hg); hg.connect(ctx.destination); s.start(tt, Math.random()); s.stop(tt + 0.04); }
+  }
+}
+function openFireworks() {
+  modalBack = (location.hash || "#home").replace(/^#/, ""); if (modalBack === "fireworks") modalBack = "home";
+  const n = fwTokens(), free = previewMode || FW.teacherFree; FW.teacherFree = false;
+  openModal('<div class="m-head"><h1>🎆 放煙火</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<p class="p-lede">' + (free ? "老師預覽模式：可以免費試放，不會扣次數。" : n ? "你有 <b>" + n + "</b> 次放煙火的機會！每拿到一張學習證書，就多一次。白天、晚上都可以放，晚上最漂亮。" : "還沒有放煙火的機會。每拿到一張學習證書，就能得到一次放煙火的機會！") + '</p>' +
+    '<div class="fw-grid">' + Object.keys(FW_SHOWS).map(k => { const s = FW_SHOWS[k]; return '<button class="fw-card" data-show="' + k + '"' + (n || free ? "" : " disabled") + '><span class="fw-ic">' + s.icon + '</span><b>' + s.name + '</b><small>' + s.desc + '</small></button>'; }).join("") + '</div>' +
+    (n || free ? "" : '<div class="row" style="margin-top:12px"><button class="btn" data-go="g6-chinese">去學習館拿證書</button></div>'), "npc-sheet");
+  $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
+  $all("[data-show]").forEach(b => b.addEventListener("click", () => startFireworks(b.getAttribute("data-show"), free)));
+}
+function startFireworks(key, free) {
+  if (FW.active || !FW.pts) return;
+  if (!free) { if (fwTokens() < 1) return; const f = store("fw") || {}; f.used = (f.used || 0) + 1; store("fw", f); updateFwCount(); }
+  stopTour(); if (RIDE.on) endRide(); closeModal();
+  if (location.hash === "#fireworks") history.replaceState(null, "", "#" + (modalBack || "home"));
+  const show = FW_SHOWS[key]; FW.show = key; FW.active = true; FW.t = -1.6; FW.events = buildShow(key); FW.end = FW.events[FW.events.length - 1].t + 4;
+  const night = S.dark > 0.45; [FW.pts, FW.refl].forEach(o => { o.material.blending = night ? THREE.AdditiveBlending : THREE.NormalBlending; o.material.needsUpdate = true; });
+  FW.prevPose = { target: controls.target.clone(), pos: camera.position.clone() };
+  if (!panelMin() && hasPanel()) { FW.reopenPanel = true; setPanelMin(true, false); } else FW.reopenPanel = false;
+  hideHero(); controls.enabled = false; flyTo(show.pose(), 1.4);
+  if (music.started) musicDuck(true);
+  let chip = $("#fwChip"); if (!chip) { chip = document.createElement("div"); chip.id = "fwChip"; chip.className = "ride-chip"; $("#app").appendChild(chip); }
+  chip.hidden = false; chip.innerHTML = '<span>' + show.icon + ' ' + show.name + '煙火秀' + (night ? "" : "（晚上放會更漂亮喔）") + '</span><button class="btn sm" id="fwStop">結束</button>';
+  $("#fwStop").addEventListener("click", endFireworks);
+  speak("煙火秀開始！" + show.name + "。");
+}
+function endFireworks() {
+  if (!FW.active) return; FW.active = false; FW.events = []; FW.emitters = [];
+  const chip = $("#fwChip"); if (chip) chip.hidden = true;
+  if (music.started) musicDuck(false);
+  controls.enabled = true; if (FW.prevPose) flyTo(FW.prevPose, 1.4);
+  if (FW.reopenPanel) setPanelMin(false, false);
+  const n = fwTokens(); setTimeout(() => toast("🎆 煙火秀結束！" + (previewMode ? "" : n ? "你還有 " + n + " 次放煙火的機會。" : "再拿一張學習證書，就能再放一次！")), 1500);
 }
 
 function openList() {
@@ -3514,6 +3986,7 @@ function refreshOpenState() {
   if ($("#modal").hidden) {
     if (focus.key) panelSubject(focus.g, focus.key, true);
     else if (focus.g === 7) panelTools(true);
+    else if (focus.g === 8) panelTrain(true);
     else if (focus.g) panelIsland(focus.g);
     else if (focus.g === null) panelHome();
   }
@@ -3567,7 +4040,8 @@ function openInfo() {
     '<section class="t-sec"><h2>時光機</h2><p class="small">暫時切換日期與時間，看看白天、夜晚和四季的樣子。</p>' +
       '<div class="form-row"><label for="pvDate">日期<input id="pvDate" type="date" value="' + o.y + "-" + ("0" + o.m).slice(-2) + "-" + ("0" + o.d).slice(-2) + '"></label><label for="pvTime">時間<input id="pvTime" type="time" value="' + ("0" + o.h).slice(-2) + ":" + ("0" + o.mi).slice(-2) + '"></label></div>' +
       '<div class="row" style="margin-top:10px">' + [["春天早晨", "04-02", "07:30"], ["夏天夜晚", "07-15", "20:30"], ["秋天黃昏", "10-25", "17:15"], ["冬天中午", "01-10", "12:20"]].map(x => '<button class="pill" data-pv="' + x[1] + " " + x[2] + '">' + x[0] + '</button>').join("") + '</div>' +
-      '<div class="row" style="margin-top:10px"><b class="small" style="min-width:3em">節慶</b>' + (() => { const st = festState(twNow()), list = [...festInstances(st.t.y), ...festInstances(st.t.y + 1)].filter(e => e.end >= st.today).sort((a, b) => a.start - b.start).slice(0, 4); return list.map(e => { const d = new Date(e.day * 864e5); return '<button class="pill" data-pvf="' + d.getUTCFullYear() + "-" + (d.getUTCMonth() + 1) + "-" + d.getUTCDate() + ' 10:30">' + e.f.icon + e.f.name + '活動</button>'; }).join(""); })() + '</div>' +
+      '<div class="row" style="margin-top:10px"><b class="small" style="min-width:3em">節慶</b>' + (() => { const st = festState(twNow()), list = [...festInstances(st.t.y), ...festInstances(st.t.y + 1)].filter(e => e.end >= st.today).sort((a, b) => a.start - b.start).slice(0, 4); return list.map(e => { const d = new Date(e.day * 864e5); return '<button class="pill" data-pvf="' + d.getUTCFullYear() + "-" + (d.getUTCMonth() + 1) + "-" + d.getUTCDate() + ' 10:30">' + e.f.icon + e.f.name + '活動</button>'; }).join(""); })() +
+        (() => { const n = showerNow(twNow()), e = n.cur || n.next; if (!e) return ""; const d = new Date(e.peak * 864e5); return '<button class="pill" data-pvf="' + d.getUTCFullYear() + "-" + (d.getUTCMonth() + 1) + "-" + d.getUTCDate() + ' 23:30">🌠' + e.s.name.replace("流星雨", "") + '流星雨</button>'; })() + '</div>' +
       '<div class="row" style="margin-top:10px"><button class="btn" id="pvGo">預覽</button><button class="btn ghost" id="pvReset">回到現在</button></div></section>' +
     '<section class="t-sec"><h2>老師</h2><p class="small">QR Code、預覽模式、教材試算表連線檢查都在老師專區。</p><button class="btn" data-go2="teacher">老師專區</button></section>' +
     '<p class="small">嘉蘭樂學島．臺東縣金峰鄉嘉蘭國小｜教材內容取材自翰林、南一、康軒等出版社，著作權屬各出版社所有，僅供教師教學及學生學習使用。<a href="#copyright">版權聲明</a></p>', "info-sheet");
@@ -3630,7 +4104,9 @@ function route() {
   if (h === "info") { openInfo(); return; }
   closeModal();
   if (h !== "home") hideHero();
-  if (h === "tools") { if (panelMin()) setPanelMin(false, false); focus.g = 7; focus.key = null; panelTools(); fly("tools", harborPose); }
+  if (h === "fireworks") { openFireworks(); return; }
+  if (h === "train") { if (panelMin()) setPanelMin(false, false); focus.g = 8; focus.key = null; panelTrain(); fly("train", trainViewPose); }
+  else if (h === "tools") { if (panelMin()) setPanelMin(false, false); focus.g = 7; focus.key = null; panelTools(); fly("tools", harborPose); }
   else if (h === "hub") { focus.g = 0; focus.key = null; panelHub(); fly("hub", () => { const t = new V3(0, 0.6, 0), p = new V3(3, isMobile() ? 38 : 25, isMobile() ? 44 : 30); shiftForPanel(t, p); return { target: t, pos: p }; }); }
   else if ((m = h.match(/^g([1-6])$/))) { focus.g = +m[1]; focus.key = null; panelIsland(+m[1]); fly(h, () => islandPose(+m[1])); speak(GRADES[m[1] - 1].name + "學習島"); }
   else if ((m = h.match(/^g([1-6])-([a-z]+)$/)) && subjectOf(m[2])) { if (panelMin()) setPanelMin(false, false); focus.g = +m[1]; focus.key = m[2]; panelSubject(+m[1], m[2]); fly(h, () => buildingPose(+m[1], m[2])); markVisited(h); }
@@ -3924,7 +4400,7 @@ function start() {
     '<aside id="panel" class="panel-card" hidden></aside>' +
     '<button id="panelTab" class="panel-tab" type="button" aria-controls="panel" aria-expanded="true" title="收合卡片"><span class="pt-arrow" aria-hidden="true">›</span><span class="pt-label"></span></button>' +
     '<footer class="bar bar-bottom">' +
-      '<div class="foot-l"><span class="foot-ic">' + ico("book") + '</span><div class="foot-txt"><small>我的探索足跡</small><b><span id="footN">0</span><em> / <span id="footT">60</span></em></b></div><div class="foot-bar"><i id="footBar"></i></div><button class="foot-cert" id="certBtn" type="button" title="我的證書" aria-label="我的證書">🎓<b id="certN">0</b></button><button class="foot-cert" id="paperBtn" type="button" title="今日島報" aria-label="今日島報">📰</button>' +
+      '<div class="foot-l"><span class="foot-ic">' + ico("book") + '</span><div class="foot-txt"><small>我的探索足跡</small><b><span id="footN">0</span><em> / <span id="footT">60</span></em></b></div><div class="foot-bar"><i id="footBar"></i></div><button class="foot-cert" id="certBtn" type="button" title="我的證書" aria-label="我的證書">🎓<b id="certN">0</b></button><button class="foot-cert" id="fwBtn" type="button" title="放煙火" aria-label="放煙火">🎆<b id="fwN">0</b></button><button class="foot-cert" id="paperBtn" type="button" title="今日島報" aria-label="今日島報">📰</button>' +
         '<div class="foot-txt magpie"><small>台灣藍鵲</small><b id="birdCount">0 / 10</b></div></div>' +
       '<nav class="tools" aria-label="地圖工具">' +
         '<button class="tool wide vbtn on" data-view="pano">' + ico("home") + '<span>全景</span></button>' +
@@ -3950,6 +4426,7 @@ function start() {
   $("#teacherBtn").addEventListener("click", () => go("teacher"));
   $("#certBtn").addEventListener("click", () => go("certs")); updateCertCount();
   $("#paperBtn").addEventListener("click", () => openPaper(false));
+  $("#fwBtn").addEventListener("click", () => openFireworks()); updateFwCount();
   $("#guideBtn").addEventListener("click", () => go("guide"));
   lockPageScroll();
   $("#hostBtn").addEventListener("click", () => openNPC({ type: "host", name: HOST_NAME }));
