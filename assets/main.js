@@ -1141,7 +1141,7 @@ function makeRingBridges() {
     for (let k = 0; k < SUBJECTS.length; k++) for (let j = 0; j < SUBJECTS.length; j++) { const a = islet(n, k), b = islet(m, j), d = a.distanceTo(b); if (!best || d < best.d) best = { a, b, d }; }
     const dir = best.b.clone().sub(best.a).normalize();
     const A = best.a.clone().addScaledVector(dir, RS - 0.25), B = best.b.clone().addScaledVector(dir, -(RS - 0.25));
-    ropeBridge(hb, A, B, 0.9, 1.1, 7);
+    if (n === 5 && m === 6) makeBascule(hb, A, B); else ropeBridge(hb, A, B, 0.9, 1.1, 7);   // 五、六年級之間是開合橋，讓樂園渡輪通過
     const side = new V3(dir.z, 0, -dir.x).multiplyScalar(0.75);
     [[A, dir.clone().multiplyScalar(-0.35)], [B, dir.clone().multiplyScalar(0.35)]].forEach(([P, back]) => [1, -1].forEach(sg => {
       const x = P.x + back.x + side.x * sg, z = P.z + back.z + side.z * sg;
@@ -1920,6 +1920,8 @@ function addLabel(obj, offY, kind, data, onClick) {
 function labelMode(L) {
   if (L.kind === "npc") return (L.data.type === "host" ? focus.g === 0 : (focus.g === L.data.g && !FEST.npc)) ? "fixed" : "hide";
   if (L.kind === "fest") return (focus.g === 0 || focus.g === null) ? "fixed" : "hide";
+  if (L.kind === "park") return focus.g === 9 && !PARK.ride && !PARK.boarded ? "fixed" : "hide";
+  if (L.kind === "ferry") return (focus.g === 9 || focus.g === 7 || focus.g === null) && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "station") return focus.g === 8 && !RIDE.on ? "fixed" : "hide";
   if (L.kind === "train") return (focus.g === null || focus.g === 0 || focus.g === 8) && !RIDE.on && !(TR.now && TR.now.closed && focus.g !== 8) ? "fixed" : "hide";
   if (L.kind === "tool") return (focus.g === 7 || (focus.g === 0 && camera.position.distanceTo(HARBOR_POS) < 40)) ? "fixed" : "hide";
@@ -1947,6 +1949,12 @@ function renderLabel(L, mode) {
     if (s) L.el.style.setProperty("--s", s.color);
     L.el.setAttribute("aria-label", host ? "島主" + d.name + "，點我問問題" : d.name + "，" + GRADES[d.g - 1].name + s.name + "助教");
     L.el.innerHTML = host ? '<i>主</i><span>島主．' + esc(d.name) + '</span>' : '<i>' + esc(s.name[0]) + '</i><span>' + esc(d.name) + '</span>';
+  } else if (L.kind === "park") {
+    L.el.className = "lbl npc station"; L.el.style.setProperty("--s", "#8A5CC2");
+    L.el.innerHTML = '<i>' + ({ wheel: "🎡", coaster: "🎢", drop: "🐟", swing: "🛶", carousel: "🐆", cups: "🏺" }[d.key]) + '</i><span>' + esc(d.name) + '</span>';
+  } else if (L.kind === "ferry") {
+    L.el.className = "lbl npc station"; L.el.style.setProperty("--s", "#8A5CC2");
+    L.el.innerHTML = '<i>⛴</i><span>樂園渡輪</span>';
   } else if (L.kind === "station") {
     L.el.className = "lbl npc station"; L.el.style.setProperty("--s", d.s.color);
     L.el.innerHTML = '<i>🚉</i><span>' + esc(d.s.name) + '</span>'; L.el.setAttribute("aria-label", d.s.name);
@@ -1968,10 +1976,10 @@ function renderLabel(L, mode) {
 const _v = new V3();
 function updateLabels() {
   const W = innerWidth, H = innerHeight;
-  if (FW.active) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
+  if (FW.active || PARK.ride || PARK.boarded) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
   labels.forEach(L => {
     const m = labelMode(L); if (m !== L.mode) renderLabel(L, m);
-    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train"].includes(L.kind)) && L.mode !== "hide";
+    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry"].includes(L.kind)) && L.mode !== "hide";
     if (L.kind === "grade" && L.data.g && focus.g === L.data.g && focus.key) show = false;
     if (!show) { L.el.style.visibility = "hidden"; return; }
     L.obj.getWorldPosition(_v); _v.y += L.offY; _v.project(camera);
@@ -2004,7 +2012,7 @@ function pickAt(cx, cy) {
   ray.setFromCamera(ptr, camera);
   const hits = ray.intersectObjects(pickables, false);
   if (!hits.length) return null;
-  const pri = ["npc", "host", "tool", "train", "bird", "mascot", "building"];
+  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "bird", "mascot", "building"];
   for (const t of pri) { const h = hits.find(x => x.object.userData.type === t); if (h) return h.object.userData; }
   return hits[0].object.userData;
 }
@@ -2015,6 +2023,8 @@ function onPick(u) {
   if (u.type === "tool") return u.i >= 0 ? openTool(u.i) : go("tools");
   if (u.type === "tools") return go("tools");
   if (u.type === "train") return go("train");
+  if (u.type === "ride") return openRide(u.key);
+  if (u.type === "park" || u.type === "ferry") return go("park");
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2056,7 +2066,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2069,7 +2079,7 @@ function initWorld() {
   let last = performance.now(), time = 0;
   renderer.setAnimationLoop(() => {
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now; time += ui.paused ? 0 : dt;
-    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on) controls.update(); stepTrain(); stepRide();
+    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt);
     scene.children.forEach(o => { if (o.userData.follow) o.position.copy(camera.position); });
     if (sunMesh.userData.dir) sunMesh.position.copy(camera.position).addScaledVector(sunMesh.userData.dir, 600);
     if (moonSprite.userData.dir) moonSprite.position.copy(camera.position).addScaledVector(moonSprite.userData.dir, 580);
@@ -2442,7 +2452,7 @@ function tabQuiz(p, L, pk) {
     const sayIt = () => speak(qs.length + "題答對" + score + "題。" + (stars === 3 ? "太厲害了！" : stars === 2 ? "做得很好！" : "繼續加油！") + (stars >= CERT_STARS ? "可以領取證書了！" : ""));
     if (stars >= CERT_STARS && !cheered) { cheered = true; stopSpeak(); const ms = playCheer(); confetti(); setTimeout(sayIt, ms); } else if (!cheered) sayIt();
     $("#again").addEventListener("click", () => { idx = 0; score = 0; cheered = false; qs = L.quiz.slice(); render(); });
-    if (stars >= CERT_STARS) { const hadCert = !!(store("certs") || {})[pk], rec = saveCert(pk, L, score, qs.length, stars); if (!hadCert) setTimeout(() => toast("🎆 拿到新證書，獲得 1 次放煙火的機會！點左下角的 🎆 就能放。"), 4200); $("#getCert").addEventListener("click", () => certView(p, rec, finish)); }
+    if (stars >= CERT_STARS) { const hadCert = !!(store("certs") || {})[pk], tk0 = parkTickets(), rec = saveCert(pk, L, score, qs.length, stars); if (!hadCert) { const moreTk = parkTickets() > tk0; setTimeout(() => toast("🎆 拿到新證書！獲得 1 次放煙火機會" + (moreTk ? "，還有 1 張🎡樂園門票" : "") + "！打開左下角的 🎒 背包看看。"), 4200); } $("#getCert").addEventListener("click", () => certView(p, rec, finish)); }
     $(".m-back", p).addEventListener("click", () => go(modalBack));
   }
   p.innerHTML = '<div class="result"><h2>挑戰關卡</h2><p>共 ' + qs.length + ' 題，全部用點的就可以作答。<br>答對 9 成以上可以得到 3 顆星！</p><button class="btn" id="start">開始挑戰</button></div>';
@@ -2546,7 +2556,21 @@ function saveCert(pk, L, score, total, stars) {
   if (!old || score / total > old.score / old.total) { all[pk] = rec; store("certs", all); updateCertCount(); return rec; }
   return old;
 }
-function updateCertCount() { const n = Object.keys(store("certs") || {}).length, el = $("#certN"); if (el) el.textContent = n; if (typeof updateFwCount === "function") updateFwCount(); }
+// 背包：證書、煙火、樂園門票、島報、魔法卡集中在一起
+function bagItems() {
+  return [["🎓", "我的證書", Object.keys(store("certs") || {}).length + " 張", () => go("certs")],
+    ["🎆", "放煙火", fwTokens() + " 次", () => openFireworks()],
+    ["🎟", "樂園門票", (typeof parkTickets === "function" ? parkTickets() : 0) + " 張", () => go("park")],
+    ["🃏", "今日魔法卡", "卡冊 " + cardBook().length + " 張", () => openDailyCard(false)],
+    ["📰", "今日島報", "", () => openPaper(false)]];
+}
+function toggleBag(force) {
+  const p = $("#bagPop"); if (!p) return; const show = force !== undefined ? force : p.hidden; p.hidden = !show;
+  if (!show) return;
+  p.innerHTML = '<b class="bag-title">🎒 我的背包</b>' + bagItems().map((it, i) => '<button class="bag-item" data-bag="' + i + '" role="menuitem"><span>' + it[0] + '</span><b>' + it[1] + '</b><small>' + it[2] + '</small></button>').join("");
+  $all("[data-bag]", p).forEach(b => b.addEventListener("click", () => { toggleBag(false); bagItems()[+b.getAttribute("data-bag")][3](); }));
+}
+function updateCertCount() { const el = $("#bagN"); if (el) { const n = fwTokens() + parkTickets(); el.textContent = n; el.hidden = !n; } }
 
 // Canvas 證書：A4 橫式，1754×1240（150 dpi）
 let certLogo = null;
@@ -3027,7 +3051,7 @@ function openNPC(d) {
 }
 const HOST_FAQ = [
   { q: "怎麼開始學習？", k: ["開始", "怎麼學", "學習", "進入", "上課", "課文"], a: "點畫面上方的「一年級」到「六年級」，或直接點海上的年級島，再點有顏色的學習館就能開始。灰色、寫著「建造中」的館，老師還在準備喔！", act: ["去六年級國語館", "g6-chinese"] },
-  { q: "怎麼拿證書？", k: ["證書", "獎狀", "獎", "拿"], a: "每一課最後有「挑戰關卡」，答對 7 成以上（2 顆星）就能領取學習證書。左下角的 🎓 可以看你拿到的所有證書，也能再下載一次。", act: ["看我的證書", "certs"] },
+  { q: "怎麼拿證書？", k: ["證書", "獎狀", "獎", "拿"], a: "每一課最後有「挑戰關卡」，答對 7 成以上（2 顆星）就能領取學習證書。左下角 🎒 背包裡的「我的證書」可以看你拿到的所有證書，也能再下載一次。", act: ["看我的證書", "certs"] },
   { q: "晚上太暗看不清楚？", k: ["暗", "黑", "晚上", "頭燈", "看不到", "看不清", "燈", "夜"], a: "點下方工具列的 🔦 頭燈，就能照亮你看的地方；也可以按 ☀ 按鈕切換成白天。", act: ["幫我開頭燈", "lamp"] },
   { q: "卡片擋住畫面？", k: ["卡片", "擋", "收合", "收起", "遮"], a: "點右邊卡片旁的「›」小把手，卡片就會收起來；想看的時候再點一次就打開。" },
   { q: "怎麼換音樂或關掉？", k: ["音樂", "歌", "吵", "音量", "聲音"], a: "點工具列的 ♪ 音樂按鈕，可以換歌、調音量，也可以關掉背景音樂。" },
@@ -3040,8 +3064,10 @@ const HOST_FAQ = [
   { q: "老師專區在哪裡？", k: ["老師專區", "密語", "qr", "QR", "管理", "預覽"], a: "畫面右上角有一個鎖頭「老師」按鈕，輸入老師通關密語就能進入。QR Code、預覽模式和行政工具都在裡面。", act: ["打開老師專區", "teacher"] },
   { q: "今晚有流星雨嗎？", k: ["流星", "星星", "天文", "許願"], a: "", act: ["", "meteor"] },
   { q: "小火車怎麼搭？", k: ["火車", "小火車", "搭車", "車站", "坐車"], a: "環島小火車每天 06:00 到 22:00 繞著群島跑，停靠 8 個車站。點畫面上的「🚃 環島小火車」可以看即時動態，還能直接上車搭一圈！", act: ["看小火車即時動態", "train"] },
-  { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。點左下角的 🎆，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
-  { q: "島報是什麼？", k: ["島報", "報紙", "新聞", "消息", "公告"], a: "每天第一次上島，島主會送來一份「嘉蘭樂學島島報」，有島上的活動、新開放的課和學習新聞。左下角的 📰 可以再看一次。", act: ["打開今日島報", "paper"] },
+  { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。打開左下角的 🎒 背包，點「放煙火」，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
+  { q: "樂園怎麼去？", k: ["樂園", "遊樂園", "摩天輪", "雲霄飛車", "渡輪", "船", "門票", "玩"], a: "琉璃珠夢幻樂園在海上的衛星島。到工具港的碼頭搭渡輪，每 6 分鐘一班（08:00–20:00），上船要驗票。第 1 張學習證書送 1 張體驗券，之後每 2 張證書再換 1 張門票！", act: ["看船期與門票", "park"] },
+  { q: "魔法卡是什麼？", k: ["魔法卡", "卡牌", "卡片", "抽卡", "心情", "卡冊"], a: "每天第一次上島可以抽一張魔法卡，上面有今天的心情、一句鼓勵的話和一個小任務。可以下載成圖片，也可以收進卡冊，打開左下角的 🎒 背包就能看。", act: ["看今天的魔法卡", "card"] },
+  { q: "島報是什麼？", k: ["島報", "報紙", "新聞", "消息", "公告"], a: "每天第一次上島，島主會送來一份「嘉蘭樂學島島報」，有島上的活動、新開放的課和學習新聞。左下角 🎒 背包裡可以再看一次。", act: ["打開今日島報", "paper"] },
   { q: "大武山和太平洋？", k: ["大武山", "太平洋", "山", "海", "船", "火車", "飛魚"], a: "大武山和太平洋還沒開放探險，以後會有新的冒險！現在可以先欣賞海上的拼板舟、飛魚，還有山腳下經過的南迴線火車。" }
 ];
 function hostAnswer(text) {
@@ -3065,7 +3091,7 @@ function openHost() {
     if (!f.a && f.act && f.act[1] === "meteor") { const info = showerNow(); f = { q: f.q, a: (info.cur ? "有喔！" : "") + showerText(info) + (info.cur ? "天黑後、天氣晴朗時，抬頭就能看到流星劃過天空。" : "到時候晚上記得上島看看！") }; }
     if (!f.a && f.act && f.act[1] === "fest") { const st = festState(), e = st.cur || st.next; f = Object.assign({}, f, { a: e ? "最近的活動是「" + e.f.title + "」，" + festDateText(e) + "白天 9:00～16:00 在嘉蘭國小操場，" + festStatusText(st, e) + "。全島的助教都會到操場集合喔！" : "最近沒有安排活動。" }); }
     const m = add("host", "<b>島主" + esc(HOST_NAME) + "</b>" + esc(f.a) + (f.act ? '<br><button class="btn ghost sm" data-act="' + f.act[1] + '">' + esc(f.act[0]) + ' →</button>' : ""));
-    const b = $("[data-act]", m); if (b) b.addEventListener("click", () => { const v = b.getAttribute("data-act"); if (v === "lamp") { setLamp(true); closeModal(); go(modalBack); } else if (v === "fest") openFest(); else if (v === "fireworks") openFireworks(); else if (v === "paper") openPaper(false); else go(v); });
+    const b = $("[data-act]", m); if (b) b.addEventListener("click", () => { const v = b.getAttribute("data-act"); if (v === "lamp") { setLamp(true); closeModal(); go(modalBack); } else if (v === "fest") openFest(); else if (v === "fireworks") openFireworks(); else if (v === "card") openDailyCard(false); else if (v === "paper") openPaper(false); else go(v); });
     speak(f.a);
   };
   $all("[data-faq]").forEach(b => b.addEventListener("click", () => { const f = HOST_FAQ[+b.getAttribute("data-faq")]; reply(f, f.q); }));
@@ -3742,7 +3768,7 @@ const FW_SHOWS = {
   dubai: { name: "杜拜跨年風", icon: "🏙", desc: "杜拜哈里發塔跨年秀：高塔從下到上噴出金色火花，再接金色光環和閃爍的星雨。", pose: () => ({ target: new V3(0, 22, 0), pos: new V3(0, 14, isMobile() ? 108 : 86) }) }
 };
 const fwTokens = () => { const n = Object.keys(store("certs") || {}).length, u = (store("fw") || {}).used || 0; return Math.max(0, n - u); };
-function updateFwCount() { const el = $("#fwN"); if (el) el.textContent = fwTokens(); }
+function updateFwCount() { updateCertCount(); }
 function initFireworks() {
   const geo = new THREE.BufferGeometry();
   const P = new Float32Array(FW_N * 3), C = new Float32Array(FW_N * 3), SZ = new Float32Array(FW_N), A = new Float32Array(FW_N);
@@ -3931,6 +3957,525 @@ function endFireworks() {
   const n = fwTokens(); setTimeout(() => toast("🎆 煙火秀結束！" + (previewMode ? "" : n ? "你還有 " + n + " 次放煙火的機會。" : "再拿一張學習證書，就能再放一次！")), 1500);
 }
 
+/* ===================== 每日魔法卡牌：每天第一次上島抽一張正向魔法卡 ===================== */
+const CARD_MOODS = [
+  { k: "開心", el: "太陽", icon: "☀", c1: "#FFB547", c2: "#FF7A3D", art: "sun" },
+  { k: "勇敢", el: "火焰", icon: "🔥", c1: "#FF5E5B", c2: "#B5322A", art: "feather" },
+  { k: "平靜", el: "海洋", icon: "🌊", c1: "#4AA8FF", c2: "#1F4E8C", art: "wave" },
+  { k: "好奇", el: "星辰", icon: "✨", c1: "#B48CFF", c2: "#5B3BA8", art: "star" },
+  { k: "溫暖", el: "百合", icon: "🌸", c1: "#FF9EC4", c2: "#C2457A", art: "lily" },
+  { k: "有活力", el: "山林", icon: "🌿", c1: "#6BD68A", c2: "#2E7D4F", art: "mountain" },
+  { k: "專心", el: "大地", icon: "🪨", c1: "#D9A86C", c2: "#7A5230", art: "jar" },
+  { k: "感恩", el: "月光", icon: "🌙", c1: "#C9D6FF", c2: "#4B5A99", art: "moon" },
+  { k: "友善", el: "琉璃", icon: "💠", c1: "#5FE3D6", c2: "#167A86", art: "bead" }
+];
+const CARD_GUARDIANS = { sun: "太陽之子", feather: "熊鷹之羽", wave: "飛魚浪花", star: "星光探險家", lily: "百合守護者", mountain: "大武山精靈", jar: "陶壺守護者", moon: "月光旅人", bead: "琉璃珠精靈" };
+const CARD_ADJ = ["閃閃發亮的", "勇往直前的", "溫柔的", "不放棄的", "愛笑的", "超有耐心的", "充滿好奇的", "善良的", "全力以赴的", "會分享的", "閃耀的", "堅強的"];
+const CARD_RARITY = [["N", 45, "#9AA3AD", "普通"], ["R", 30, "#4AA8FF", "稀有"], ["SR", 17, "#B48CFF", "超稀有"], ["SSR", 6.5, "#F2C14E", "傳說"], ["UR", 1.5, "#FF6FB5", "神話"]];
+const CARD_WORDS = [
+  "犯錯是學習的一部分，你今天又變得更厲害了！", "你不需要跟別人比，只要比昨天的自己進步一點點。", "願意試試看，就已經很勇敢了。",
+  "慢慢來沒關係，每一步都算數。", "你的笑容可以讓身邊的人一整天都開心。", "遇到不會的題目，代表你正在長出新的能力。",
+  "今天也謝謝努力的自己。", "你很重要，你的想法也很重要。", "問問題是聰明人的超能力。", "累了就休息一下，休息完再出發。",
+  "只要不放棄，就沒有失敗，只有還沒成功。", "你比你想像的還要強大。", "幫助別人的時候，你也在發光。", "每天讀一點點，一年後會嚇自己一跳。",
+  "大聲說出你的答案，錯了也沒關係！", "你是大武山下最獨特的孩子。", "專心做好一件小事，就是今天的大勝利。", "好朋友會一起進步，你也是別人的好朋友。",
+  "把困難拆成小步驟，一步一步就能完成。", "今天的你，值得一個大大的讚！", "記得喝水、記得微笑、記得相信自己。", "失敗只是告訴你：換個方法再試一次。",
+  "你的努力，祖先和土地都看得見。", "說一聲謝謝，會讓世界變得更溫暖。", "你學會的每一個字，都是送給未來自己的禮物。", "保持好奇心，世界就是你的教室。",
+  "跌倒了就拍拍灰塵，再站起來。", "你今天的勇氣，會變成明天的力量。", "相信自己，你可以的！", "做自己就很好，不用變成別人。"
+];
+const CARD_SKILLS = [
+  ["勇氣加倍", "今天在課堂上舉手一次，勇氣值 +10！"], ["微笑光環", "對三個人微笑，大家的心情都會變好。"], ["專注結界", "寫功課時放下手機 20 分鐘，專注力 +20！"],
+  ["感謝之心", "跟家人或老師說一聲謝謝，溫暖值 +15。"], ["知識吸收", "今天多讀一頁書，智慧值 +10。"], ["友情連結", "邀請一位同學一起玩或一起讀書。"],
+  ["整理魔法", "把書包整理乾淨，明天出門更順利。"], ["挑戰之門", "到樂學島完成一個挑戰關卡！"], ["族語咒語", "用族語跟 vuvu 說一句早安。"], ["運動能量", "跑跳 10 分鐘，活力值 +20！"]
+];
+function rollCard() {
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  let r = Math.random() * 100, rar = CARD_RARITY[0];
+  for (const x of CARD_RARITY) { if ((r -= x[1]) <= 0) { rar = x; break; } }
+  const mood = pick(CARD_MOODS), lvl = CARD_RARITY.indexOf(rar), base = 55 + lvl * 8;
+  const st = () => Math.min(99, base + Math.floor(Math.random() * 18));
+  const t = twNow(), sk = pick(CARD_SKILLS);
+  return { date: t.y + "-" + t.m + "-" + t.d, no: String(Math.floor(Math.random() * 9000) + 1000), rar: rar[0], mood: mood.k, name: pick(CARD_ADJ) + CARD_GUARDIANS[mood.art], word: pick(CARD_WORDS), skill: sk[0], skillTxt: sk[1], stats: [st(), st(), st()] };
+}
+const moodOf = k => CARD_MOODS.find(m => m.k === k) || CARD_MOODS[0];
+const rarOf = k => CARD_RARITY.find(r => r[0] === k) || CARD_RARITY[0];
+function cardArt(x, kind, cx, cy, s, c1, c2) {
+  // 卡面插圖：用幾何圖形畫出排灣族與嘉蘭的意象
+  x.save(); x.translate(cx, cy);
+  const glowR = x.createRadialGradient(0, 0, 4, 0, 0, s * 1.3); glowR.addColorStop(0, "rgba(255,255,255,.85)"); glowR.addColorStop(0.35, c1); glowR.addColorStop(1, "rgba(0,0,0,0)");
+  x.fillStyle = glowR; x.beginPath(); x.arc(0, 0, s * 1.3, 0, 7); x.fill();
+  x.fillStyle = "#FFFFFF"; x.strokeStyle = "#FFFFFF"; x.lineWidth = s * 0.06; x.lineJoin = "round";
+  const P = pts => { x.beginPath(); pts.forEach((p, i) => i ? x.lineTo(p[0] * s, p[1] * s) : x.moveTo(p[0] * s, p[1] * s)); x.closePath(); };
+  switch (kind) {
+    case "sun": for (let i = 0; i < 16; i++) { x.save(); x.rotate(i / 16 * Math.PI * 2); P([[-0.08, -0.45], [0, -0.95], [0.08, -0.45]]); x.fill(); x.restore(); } x.beginPath(); x.arc(0, 0, s * 0.42, 0, 7); x.fill(); x.fillStyle = c2; x.beginPath(); x.arc(0, 0, s * 0.18, 0, 7); x.fill(); break;
+    case "feather": P([[0, -0.95], [0.32, -0.4], [0.26, 0.4], [0, 0.85], [-0.26, 0.4], [-0.32, -0.4]]); x.fill(); x.strokeStyle = c2; x.beginPath(); x.moveTo(0, -0.9 * s); x.lineTo(0, 0.85 * s); x.stroke(); for (let i = -3; i <= 3; i++) { x.beginPath(); x.moveTo(0, i * 0.2 * s); x.lineTo(0.25 * s, (i * 0.2 - 0.12) * s); x.moveTo(0, i * 0.2 * s); x.lineTo(-0.25 * s, (i * 0.2 - 0.12) * s); x.stroke(); } break;
+    case "wave": x.lineWidth = s * 0.12; for (let k = 0; k < 3; k++) { x.beginPath(); for (let i = 0; i <= 20; i++) { const xx = (-1 + i / 10) * s * 0.9, yy = (0.2 + k * 0.28) * s + Math.sin(i * 0.9 + k) * s * 0.1; i ? x.lineTo(xx, yy) : x.moveTo(xx, yy); } x.stroke(); }
+      P([[-0.55, -0.25], [0.35, -0.45], [0.6, -0.3], [0.35, -0.15]]); x.fill(); P([[-0.1, -0.35], [0.1, -0.85], [0.25, -0.38]]); x.fill(); P([[-0.55, -0.25], [-0.8, -0.45], [-0.75, -0.1]]); x.fill(); break;
+    case "star": for (let k = 0; k < 2; k++) { const r0 = k ? 0.35 : 0.95, r1 = k ? 0.15 : 0.38; x.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = (i % 2 ? r1 : r0) * s; i ? x.lineTo(Math.cos(a) * r, Math.sin(a) * r) : x.moveTo(Math.cos(a) * r, Math.sin(a) * r); } x.closePath(); x.fillStyle = k ? c2 : "#FFFFFF"; x.fill(); } break;
+    case "lily": for (let i = 0; i < 6; i++) { x.save(); x.rotate(i / 6 * Math.PI * 2); x.beginPath(); x.ellipse(0, -0.5 * s, 0.2 * s, 0.48 * s, 0, 0, 7); x.fill(); x.restore(); } x.fillStyle = "#F2C14E"; x.beginPath(); x.arc(0, 0, s * 0.16, 0, 7); x.fill(); break;
+    case "mountain": P([[-0.95, 0.6], [-0.35, -0.35], [-0.05, 0.05], [0.3, -0.75], [0.95, 0.6]]); x.fill(); x.fillStyle = c2; P([[0.3, -0.75], [0.12, -0.45], [0.3, -0.5], [0.45, -0.45]]); x.fill(); break;
+    case "jar": x.beginPath(); x.ellipse(0, 0.15 * s, 0.62 * s, 0.6 * s, 0, 0, 7); x.fill(); x.fillRect(-0.28 * s, -0.75 * s, 0.56 * s, 0.4 * s); x.fillStyle = c2;
+      for (let i = -2; i <= 2; i++) { x.save(); x.translate(i * 0.22 * s, 0.1 * s); x.rotate(Math.PI / 4); x.fillRect(-0.07 * s, -0.07 * s, 0.14 * s, 0.14 * s); x.restore(); } x.fillRect(-0.6 * s, -0.12 * s, 1.2 * s, 0.05 * s); x.fillRect(-0.6 * s, 0.3 * s, 1.2 * s, 0.05 * s); break;
+    case "moon": x.beginPath(); x.arc(0, 0, 0.75 * s, 0, 7); x.fill(); x.globalCompositeOperation = "destination-out"; x.beginPath(); x.arc(0.32 * s, -0.15 * s, 0.62 * s, 0, 7); x.fill(); x.globalCompositeOperation = "source-over"; break;
+    case "bead": [0.8, 0.58, 0.36, 0.16].forEach((r, i) => { x.fillStyle = ["#FFFFFF", c2, "#F2C14E", "#B5322A"][i]; x.beginPath(); x.arc(0, 0, r * s, 0, 7); x.fill(); }); for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; x.fillStyle = "#FFFFFF"; x.beginPath(); x.arc(Math.cos(a) * 0.47 * s, Math.sin(a) * 0.47 * s, 0.06 * s, 0, 7); x.fill(); } break;
+  }
+  x.restore();
+}
+async function drawMagicCard(c) {
+  const W = 720, H = 1008, cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const x = cv.getContext("2d"), m = moodOf(c.mood), r = rarOf(c.rar), lvl = CARD_RARITY.indexOf(r);
+  const FONT = '"Noto Sans TC", sans-serif', DISP = '"LXGW WenKai TC", "Noto Serif TC", serif';
+  try { await document.fonts.load("700 40px \"LXGW WenKai TC\"", c.name + c.word + c.skill + c.skillTxt + "魔法卡今日心情勇氣智慧友善嘉蘭樂學島屬性"); } catch (e) {}
+  const rr = (X, Y, w, h, rad) => { x.beginPath(); x.moveTo(X + rad, Y); x.arcTo(X + w, Y, X + w, Y + h, rad); x.arcTo(X + w, Y + h, X, Y + h, rad); x.arcTo(X, Y + h, X, Y, rad); x.arcTo(X, Y, X + w, Y, rad); x.closePath(); };
+  // 外框：稀有度顏色（SSR 金、UR 彩虹）
+  let frame = r[2];
+  if (c.rar === "UR") { const g = x.createLinearGradient(0, 0, W, H); ["#FF6FB5", "#F2C14E", "#6BD68A", "#4AA8FF", "#B48CFF", "#FF6FB5"].forEach((col, i) => g.addColorStop(i / 5, col)); frame = g; }
+  else if (c.rar === "SSR") { const g = x.createLinearGradient(0, 0, W, H); [[0, "#8A6420"], [0.3, "#FFF1BE"], [0.5, "#C59A3C"], [0.75, "#FFE9A0"], [1, "#7E5A1C"]].forEach(s => g.addColorStop(s[0], s[1])); frame = g; }
+  rr(0, 0, W, H, 40); x.fillStyle = frame; x.fill();
+  rr(22, 22, W - 44, H - 44, 28); x.fillStyle = "#14182B"; x.fill();
+  // 卡名列
+  const bg = x.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, m.c1); bg.addColorStop(1, m.c2);
+  rr(40, 40, W - 80, 86, 20); x.fillStyle = bg; x.fill();
+  x.fillStyle = "#FFFFFF"; x.font = "700 44px " + DISP; x.textBaseline = "middle"; x.textAlign = "left";
+  let nm = c.name; while (x.measureText(nm).width > W - 230 && nm.length > 2) nm = nm.slice(0, -1);
+  x.shadowColor = "rgba(0,0,0,.35)"; x.shadowBlur = 6; x.fillText(nm, 66, 84); x.shadowBlur = 0;
+  // 屬性寶石
+  x.beginPath(); x.arc(W - 92, 83, 36, 0, 7); x.fillStyle = "#14182B"; x.fill(); x.lineWidth = 5; x.strokeStyle = typeof frame === "string" ? frame : "#F2C14E"; x.stroke();
+  x.font = "36px sans-serif"; x.textAlign = "center"; x.fillStyle = "#fff"; x.fillText(m.icon, W - 92, 86);
+  // 插圖框
+  const ax = 52, ay = 142, aw = W - 104, ah = 430;
+  rr(ax, ay, aw, ah, 18); x.save(); x.clip();
+  const ag = x.createLinearGradient(0, ay, 0, ay + ah); ag.addColorStop(0, m.c2); ag.addColorStop(1, m.c1); x.fillStyle = ag; x.fillRect(ax, ay, aw, ah);
+  x.globalAlpha = 0.18; for (let i = 0; i < 24; i++) { x.fillStyle = "#fff"; x.save(); x.translate(W / 2, ay + ah / 2); x.rotate(i / 24 * Math.PI * 2); x.beginPath(); x.moveTo(0, 0); x.lineTo(-30, -420); x.lineTo(30, -420); x.closePath(); x.fill(); x.restore(); }
+  x.globalAlpha = 1;
+  for (let i = 0; i < 40; i++) { x.fillStyle = "rgba(255,255,255," + (0.3 + Math.random() * 0.6) + ")"; x.beginPath(); x.arc(ax + Math.random() * aw, ay + Math.random() * ah, Math.random() * 3 + 1, 0, 7); x.fill(); }
+  // 排灣族菱形紋（插圖下緣）
+  for (let i = 0; i < 14; i++) { const cx = ax + (i + 0.5) * aw / 14, cy = ay + ah - 22; x.fillStyle = i % 2 ? "rgba(255,255,255,.75)" : "rgba(20,24,43,.55)"; x.beginPath(); x.moveTo(cx, cy - 14); x.lineTo(cx + 18, cy); x.lineTo(cx, cy + 14); x.lineTo(cx - 18, cy); x.closePath(); x.fill(); }
+  cardArt(x, m.art, W / 2, ay + ah / 2 - 18, 150, m.c1, m.c2);
+  x.restore();
+  rr(ax, ay, aw, ah, 18); x.lineWidth = 4; x.strokeStyle = "rgba(255,255,255,.6)"; x.stroke();
+  // 稀有度與種類列
+  rr(40, 590, W - 80, 58, 14); x.fillStyle = "#1F2540"; x.fill();
+  x.textAlign = "left"; x.fillStyle = "#fff"; x.font = "700 28px " + FONT; x.fillText("【" + m.el + "屬性】今日心情：" + c.mood, 64, 620);
+  x.textAlign = "right"; x.font = "900 34px Georgia, serif"; x.fillStyle = typeof frame === "string" ? frame : "#F2C14E";
+  x.fillText("★".repeat(lvl + 1) + " " + c.rar, W - 64, 621);
+  // 文字框
+  rr(40, 662, W - 80, 230, 16); x.fillStyle = "#F7F1E3"; x.fill();
+  x.textAlign = "left"; x.fillStyle = "#8E2A22"; x.font = "700 27px " + FONT; x.fillText("✦ 技能：" + c.skill, 64, 698);
+  x.fillStyle = "#333"; x.font = "400 25px " + FONT;
+  const wrap = (txt, X, Y, maxW, lh, maxLines) => { let line = "", n = 0; for (const ch of txt) { if (x.measureText(line + ch).width > maxW) { x.fillText(line, X, Y + n * lh); line = ch; if (++n >= maxLines) return n; } else line += ch; } if (line) { x.fillText(line, X, Y + n * lh); n++; } return n; };
+  wrap(c.skillTxt, 64, 736, W - 128, 34, 2);
+  x.strokeStyle = "rgba(0,0,0,.12)"; x.lineWidth = 2; x.beginPath(); x.moveTo(64, 790); x.lineTo(W - 64, 790); x.stroke();
+  x.fillStyle = "#1F2A28"; x.font = "700 28px " + DISP; wrap("「" + c.word + "」", 64, 826, W - 128, 38, 2);
+  // 數值列
+  const names = ["勇氣", "智慧", "友善"];
+  names.forEach((n, i) => {
+    const bx = 52 + i * ((W - 104) / 3), bw = (W - 104) / 3 - 10;
+    rr(bx, 904, bw, 58, 14); x.fillStyle = ["#B5322A", "#2B7BD6", "#2E9E5B"][i]; x.fill();
+    x.fillStyle = "#fff"; x.textAlign = "center"; x.font = "700 24px " + FONT; x.fillText(n + " " + c.stats[i], bx + bw / 2, 934);
+  });
+  x.textAlign = "left"; x.fillStyle = "rgba(255,255,255,.55)"; x.font = "400 18px " + FONT; x.fillText("嘉蘭樂學島．魔法卡 No." + c.no, 46, 985);
+  x.textAlign = "right"; x.fillText(c.date.replace(/-/g, "/"), W - 46, 985);
+  return cv;
+}
+const cardBook = () => store("cardBook") || [];
+function saveCardToBook(c) { const b = cardBook(); if (!b.some(k => k.no === c.no && k.date === c.date)) { b.unshift(c); store("cardBook", b.slice(0, 120)); } updateCardCount(); }
+function updateCardCount() { updateCertCount(); }
+async function cardDownload(c) {
+  const cv = await drawMagicCard(c);
+  cv.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "嘉蘭樂學島魔法卡_" + c.date + "_" + c.name + ".png"; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }, "image/png");
+  playChime();
+}
+async function showCardView(host, c, opts) {
+  // 翻牌動畫 + 稀有卡閃光
+  opts = opts || {};
+  const r = rarOf(c.rar), holo = ["SR", "SSR", "UR"].includes(c.rar);
+  host.innerHTML = '<div class="mcard-stage"><div class="mcard' + (opts.flip ? "" : " open") + '" id="mcard"><div class="mc-back"><span>✦</span><b>今日魔法卡</b><small>點一下翻開</small></div><div class="mc-front' + (holo ? " holo holo-" + c.rar : "") + '"><img id="mcImg" alt="魔法卡：' + esc(c.name) + '"></div></div></div>' +
+    '<div class="row mcard-act" id="mcAct"' + (opts.flip ? " hidden" : "") + '><button class="btn" id="mcDl">⬇ 下載卡片</button>' + (opts.saved ? "" : '<button class="btn ghost" id="mcSave">📥 收進卡冊</button>') + '<button class="btn ghost" id="mcBook">🃏 我的卡冊</button></div>';
+  const cv = await drawMagicCard(c); const img = $("#mcImg"); if (img) img.src = cv.toDataURL("image/png");
+  const card = $("#mcard"), act = $("#mcAct");
+  const reveal = () => {
+    if (card.classList.contains("open")) return; card.classList.add("open"); act.hidden = false;
+    const lvl = CARD_RARITY.indexOf(r);
+    if (lvl >= 3) { playCheer(false); confetti(2600); } else playChime();
+    speak("今天的魔法卡是：" + c.name + "。" + c.word);
+  };
+  if (opts.flip) { card.addEventListener("click", reveal); }
+  $("#mcDl").addEventListener("click", () => cardDownload(c));
+  const sv = $("#mcSave"); if (sv) sv.addEventListener("click", () => { saveCardToBook(c); sv.textContent = "✓ 已收進卡冊"; sv.disabled = true; toast("已收進卡冊（存在這台裝置的瀏覽器裡）"); });
+  $("#mcBook").addEventListener("click", () => openCardBook());
+  // 卡片跟著指標傾斜（立體感）
+  card.addEventListener("pointermove", e => { if (!card.classList.contains("open") || reduceMotion) return; const b = card.getBoundingClientRect(), px = (e.clientX - b.left) / b.width - 0.5, py = (e.clientY - b.top) / b.height - 0.5; card.style.setProperty("--rx", (-py * 14) + "deg"); card.style.setProperty("--ry", (px * 18) + "deg"); card.style.setProperty("--hx", (px * 100 + 50) + "%"); });
+  card.addEventListener("pointerleave", () => { card.style.setProperty("--rx", "0deg"); card.style.setProperty("--ry", "0deg"); });
+}
+function openDailyCard(auto) {
+  modalBack = (location.hash || "#home").replace(/^#/, ""); if (["card", "cards"].includes(modalBack)) modalBack = "home";
+  const t = twNow(), today = t.y + "-" + t.m + "-" + t.d, d = store("cardToday");
+  let c = d && d.date === today ? d : null, fresh = false;
+  if (!c) { c = rollCard(); store("cardToday", c); fresh = true; }
+  const saved = cardBook().some(k => k.no === c.no && k.date === c.date);
+  openModal('<div class="m-head"><h1>🃏 今日魔法卡</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<p class="p-lede">' + (fresh || auto ? "每天第一次上島，可以抽一張正向魔法卡。點卡片翻開看看今天的心情和祝福！" : "這是你今天抽到的魔法卡，明天會再抽一張新的。") + '</p><div id="mcHost"></div>', "npc-sheet card-sheet");
+  showCardView($("#mcHost"), c, { flip: fresh || auto, saved });
+}
+function openCardBook() {
+  modalBack = "home";
+  const b = cardBook();
+  openModal('<div class="m-head"><h1>🃏 我的卡冊</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<p class="p-lede">收進卡冊的魔法卡會存在這台裝置的瀏覽器裡（最多 120 張）。清除瀏覽資料就會不見，喜歡的卡片記得下載。</p>' +
+    (b.length ? '<div class="cb-grid">' + b.map((c, i) => { const m = moodOf(c.mood), r = rarOf(c.rar); return '<button class="cb-item" data-i="' + i + '" style="--c1:' + m.c1 + ';--c2:' + m.c2 + ';--rc:' + r[2] + '"><span class="cb-rar">' + c.rar + '</span><span class="cb-ic">' + m.icon + '</span><b>' + esc(c.name) + '</b><small>' + c.date.replace(/-/g, "/") + '．' + esc(c.mood) + '</small></button>'; }).join("") + '</div>'
+      : '<div class="cert-empty">卡冊還是空的。<br>每天第一次上島抽到魔法卡後，按「收進卡冊」就會出現在這裡。<br><button class="btn" id="cbToday">看今天的魔法卡</button></div>'), "list");
+  $all(".cb-item").forEach(el => el.addEventListener("click", () => {
+    const c = b[+el.getAttribute("data-i")];
+    openModal('<div class="m-head"><h1>🃏 ' + esc(c.name) + '</h1><button class="m-close" aria-label="關閉">×</button></div><div id="mcHost"></div><div class="row" style="justify-content:center;margin-top:8px"><button class="btn ghost" id="cbBack">← 回卡冊</button></div>', "npc-sheet card-sheet");
+    showCardView($("#mcHost"), c, { saved: true }); $("#cbBack").addEventListener("click", openCardBook);
+  }));
+  const tb = $("#cbToday"); if (tb) tb.addEventListener("click", () => openDailyCard(false));
+}
+function maybeDailyCard() {
+  // 島報看完之後再發魔法卡
+  let tries = 0;
+  const chk = () => {
+    tries++;
+    const t = twNow(), today = t.y + "-" + t.m + "-" + t.d, d = store("cardToday");
+    if (d && d.date === today && d.seen) return;
+    const paperDone = (store("paper") || {}).date === todayKey();
+    if (!store("guided") || !$("#modal").hidden || !paperDone || FW.active || RIDE.on || (PARK && PARK.ride)) { if (tries < 200) setTimeout(chk, 3000); return; }
+    openDailyCard(true);
+    const c = store("cardToday"); if (c) { c.seen = true; store("cardToday", c); }
+  };
+  setTimeout(chk, 4000);
+}
+
+/* ===================== 衛星島：琉璃珠夢幻樂園（證書獎勵） ===================== */
+// 遊樂設施的「種類」參考世界各地的遊樂園（摩天輪、雲霄飛車、自由落體、海盜船、旋轉木馬、咖啡杯），造型全部是原創的嘉蘭／排灣族主題。
+const PARK = { pos: new V3(80, 0, 34), R: 12, rides: {}, ferry: null, path: null, back: null, ride: null, inPark: false, wait: false, labels: [] };
+const PARK_NAME = "琉璃珠夢幻樂園";
+const FERRY = { OPEN: 8 * 3600, CLOSE: 20 * 3600, C: 360, BOARD: 60, SAIL: 90 };   // 每 6 分鐘一班，開船前 60 秒開放上船
+const BASCULE = { leaves: [], mid: null, ang: 0 };
+// 門票：第 1 張證書送 1 張體驗券，之後每 2 張證書再換 1 張
+const parkTickets = () => { const n = Object.keys(store("certs") || {}).length, used = (store("park") || {}).used || 0; return Math.max(0, (n >= 1 ? 1 + Math.floor((n - 1) / 2) : 0) - used); };
+function makeBascule(hb, A, B) {
+  // 可以向上打開的吊橋（開合橋）：樂園渡輪經過時兩片橋面會翹起來
+  const dir = B.clone().sub(A), L = dir.length(); dir.normalize();
+  [[A, dir], [B, dir.clone().negate()]].forEach(([P, d]) => {
+    const base = new THREE.Group(); base.position.set(P.x, 0.45, P.z); base.rotation.y = Math.atan2(d.x, d.z); scene.add(base);
+    const leaf = new THREE.Group(); base.add(leaf);
+    leaf.add(part(box(1.15, 0.12, L / 2 - 0.05), M("#C9A577"), 0, 0, L / 4));
+    [-0.55, 0.55].forEach(x => { leaf.add(part(box(0.06, 0.5, L / 2 - 0.05), M("#8F7553"), x, 0.28, L / 4)); });
+    for (let i = 1; i < 6; i++) leaf.add(part(box(1.1, 0.02, 0.05), M("#9C7B52"), 0, 0.07, i * L / 12));
+    leaf.add(part(box(1.3, 0.16, 0.16), M("#B5322A"), 0, 0, 0.05));
+    base.add(part(box(1.5, 1.0, 0.5), M("#8A8F96"), 0, -0.5, -0.2));
+    BASCULE.leaves.push(leaf);
+  });
+  BASCULE.mid = A.clone().add(B).multiplyScalar(0.5);
+}
+function stepBascule(dt) {
+  if (!BASCULE.mid || !PARK.ferry) return;
+  const ph = PARK.fst && PARK.fst.phase, moving = ph === "toPark" || ph === "toHarbor" || (ph === "boardH" && PARK.fst.left < 12);
+  const want = moving && PARK.ferry.position.distanceTo(BASCULE.mid) < 14 ? 1.15 : 0;
+  BASCULE.ang += (want - BASCULE.ang) * Math.min(1, dt * 1.5);
+  BASCULE.leaves.forEach(l => { l.rotation.x = -BASCULE.ang; });
+}
+/* ---------- 樂園島與設施 ---------- */
+function parkLocal(x, y, z) { return PARK.pos.clone().add(new V3(x, y, z)); }
+function makePark() {
+  const root = new THREE.Group(), P = PARK.pos;
+  floatingIsland(PARK.R, 2.8, root, 0, 0, { type: "park" });
+  // 步道與廣場
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(4.2, 40), M("#E9D9B8")); plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.02; root.add(plaza);
+  for (let i = 0; i < 18; i++) { const a = i / 18 * Math.PI * 2; root.add(part(box(0.5, 0.03, 6.5), M("#E2CDA6"), Math.cos(a) * 7.2, 0.025, Math.sin(a) * 7.2, 0, -a, 0)); }
+  // 大門：排灣族圖騰柱＋彩色拱門（面向樂學島）
+  const gate = new THREE.Group(); gate.position.set(-10.6, 0, 0); gate.rotation.y = Math.PI / 2; root.add(gate);
+  [-1.8, 1.8].forEach(x => { const tp = totemPillar(3.4, 0.5); tp.position.set(x, 0, 0); gate.add(tp); });
+  const arch = new THREE.TorusGeometry(1.9, 0.18, 8, 24, Math.PI); gate.add(part(arch, M("#E8B33A"), 0, 3.3, 0));
+  const sb = signBoard(PARK_NAME, "#8A5CC2", 3.8); sb.position.set(0, 3.5, 0.15); sb.scale.setScalar(0.8); gate.add(sb);
+  // 碼頭
+  for (let i = 0; i < 8; i++) root.add(part(box(0.4, 0.08, 1.6), M("#B8925E"), -12.3 - i * 0.42, 0.02, -2.6));
+  [[-12.4, -1.9], [-15.2, -1.9], [-12.4, -3.3], [-15.2, -3.3]].forEach(([x, z]) => root.add(part(cyl(0.08, 0.09, 3.4, 6), M("#7A5A3A"), x, -1.6, z)));
+  // 花、樹、氣球攤
+  [[-8, -7, "pine"], [-8.5, 7, "a"], [9.5, -7.5, "c"], [-2, 10.5, "b"], [10.5, 8, "pine"]].forEach(t => { const tr = tree(t[2], 1.1); tr.position.set(t[0], 0, t[1]); root.add(tr); });
+  const cols = ["#E2573B", "#F2C14E", "#2F7FC1", "#8A5CC2", "#4E9F50", "#F2A9BE"];
+  for (let i = 0; i < 7; i++) { root.add(part(sph(0.22, 8, 6), M(cols[i % 6]), -7.2 + (i % 3) * 0.3, 2.2 + Math.floor(i / 3) * 0.32, 2.6 + (i % 2) * 0.3)); }
+  root.add(part(cyl(0.01, 0.01, 2.2, 3), M("#FFFFFF"), -7, 1.1, 2.7));
+  mergeStatic(root); root.position.copy(P); scene.add(root);
+
+  const dyn = new THREE.Group(); dyn.position.copy(P); scene.add(dyn); PARK.dyn = dyn;
+  const addRide = (key, name, desc, lx, lz, obj, labelY) => {
+    obj.position.set(lx, 0, lz); dyn.add(obj);
+    const hit = new THREE.Mesh(cyl(2.4, 2.4, labelY, 10), new THREE.MeshBasicMaterial({ visible: false })); hit.position.set(lx, labelY / 2, lz); hit.userData = { pick: true, type: "ride", key }; dyn.add(hit); pickables.push(hit);
+    const an = new THREE.Object3D(); an.position.set(lx, labelY + 0.4, lz); dyn.add(an);
+    PARK.rides[key] = Object.assign(PARK.rides[key] || {}, { key, name, desc, obj, local: new V3(lx, 0, lz) });
+    PARK.labels.push(addLabel(an, 0, "park", { key, name }, () => openRide(key)));
+  };
+  // 1. 琉璃珠摩天輪
+  { const g = new THREE.Group(), wheel = new THREE.Group(); wheel.position.y = 5.6; g.add(wheel);
+    [-0.55, 0.55].forEach(z => { const leg = part(box(0.22, 6.2, 0.22), M("#D8D2C4"), -1.6, 2.8, z, 0, 0, -0.28); g.add(leg); g.add(part(box(0.22, 6.2, 0.22), M("#D8D2C4"), 1.6, 2.8, z, 0, 0, 0.28)); });
+    const rim = new THREE.TorusGeometry(4.3, 0.09, 6, 48); [-0.35, 0.35].forEach(z => wheel.add(part(rim, M("#FFFFFF"), 0, 0, z)));
+    for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; const sp = part(box(0.05, 4.3, 0.05), M("#FFFFFF"), Math.cos(a) * 2.15, Math.sin(a) * 2.15, 0, 0, 0, a - Math.PI / 2); wheel.add(sp); }
+    wheel.add(part(cyl(0.35, 0.35, 1.0, 12), M("#B5322A"), 0, 0, 0, Math.PI / 2, 0, 0));
+    const beads = ["#C8423B", "#F2C14E", "#2F7FC1", "#3E7D4F", "#8A5CC2", "#E07B1F"], gons = [];
+    for (let i = 0; i < 12; i++) { const gd = new THREE.Group(); gd.add(part(sph(0.42, 12, 10), M(beads[i % 6]), 0, -0.45, 0)); gd.add(part(cyl(0.44, 0.44, 0.08, 12), M("#F2C14E"), 0, -0.45, 0)); gd.add(part(cyl(0.02, 0.02, 0.4, 4), M("#888"), 0, -0.1, 0)); wheel.add(gd); gons.push(gd); }
+    g.userData = { wheel, gons };
+    addRide("wheel", "琉璃珠摩天輪", "12 個車廂都是排灣族的琉璃珠顏色。坐到最高點，可以看到整座嘉蘭樂學島和大武山！", 3, -7, g, 10.5); }
+  // 2. 大武山雲霄飛車
+  { const g = new THREE.Group();
+    const pts = [[5.5, 1.4, 0.5], [8.6, 4.6, -1.8], [10.6, 1.6, 2.0], [9.4, 5.4, 6.6], [5.6, 1.6, 9.4], [2.4, 3.6, 7.0], [3.6, 1.0, 3.2]].map(p => new V3(p[0] - 7, p[1], p[2] - 4));
+    const curve = new THREE.CatmullRomCurve3(pts, true, "catmullrom", 0.5);
+    g.add(part(new THREE.TubeGeometry(curve, 200, 0.1, 6, true), M("#B5322A")));
+    for (let i = 0; i < 28; i++) { const p = curve.getPointAt(i / 28); g.add(part(cyl(0.05, 0.06, p.y, 5), M("#D8D2C4"), p.x, p.y / 2, p.z)); }
+    const cart = new THREE.Group(); [0, 1, 2].forEach(k => { const c = new THREE.Group(); c.add(part(box(0.55, 0.35, 0.7), M(["#F2C14E", "#2F7FC1", "#4E9F50"][k]), 0, 0.25, 0)); cart.add(c); }); g.add(cart);
+    g.userData = { curve, cars: cart.children };
+    addRide("coaster", "大武山雲霄飛車", "沿著大武山的稜線上上下下、左彎右拐，是全樂園最刺激的設施！", 7, 4, g, 6.4); }
+  // 3. 飛魚衝天塔（自由落體）
+  { const g = new THREE.Group(); g.add(part(cyl(0.35, 0.45, 10, 10), M("#2F7FC1"), 0, 5, 0)); g.add(part(cone(0.6, 1.2, 10), M("#F2C14E"), 0, 10.6, 0));
+    const ring = new THREE.Group(); ring.add(part(cyl(1.1, 1.1, 0.35, 16), M("#E2573B"), 0, 0, 0)); for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; ring.add(part(box(0.3, 0.45, 0.3), M("#FFFFFF"), Math.cos(a) * 1.2, -0.3, Math.sin(a) * 1.2)); } ring.position.y = 1; g.add(ring);
+    for (let i = 0; i < 4; i++) { const f = part(cone(0.18, 0.7, 4), M("#9CC9F0"), 0, 6 + i * 1.1, 0.45); f.rotation.x = Math.PI / 2; g.add(f); }
+    g.userData = { ring };
+    addRide("drop", "飛魚衝天塔", "像飛魚躍出海面一樣衝上高空，再「咻——」一下落下來！", -6, 6, g, 11.4); }
+  // 4. 拼板舟大擺盪（海盜船）
+  { const g = new THREE.Group(); [-1.4, 1.4].forEach(x => { g.add(part(box(0.2, 4.2, 0.2), M("#8A6A48"), x, 2.0, -1.0, 0.45, 0, 0)); g.add(part(box(0.2, 4.2, 0.2), M("#8A6A48"), x, 2.0, 1.0, -0.45, 0, 0)); });
+    const piv = new THREE.Group(); piv.position.y = 3.9; g.add(piv);
+    const boatG = new THREE.Group(); boatG.position.y = -2.6; piv.add(boatG);
+    const hull = new THREE.Shape(); hull.moveTo(-0.9, -1.8); hull.quadraticCurveTo(0, -2.4, 0.9, -1.8); hull.lineTo(0.9, 1.8); hull.quadraticCurveTo(0, 2.4, -0.9, 1.8); hull.closePath();
+    const hg = new THREE.ExtrudeGeometry(hull, { depth: 0.9, bevelEnabled: false }); hg.rotateX(Math.PI / 2); hg.translate(0, 0.45, 0); boatG.add(part(hg, M("#F4EFE3")));
+    boatG.add(part(box(1.9, 0.12, 3.9), M("#B5322A"), 0, 0.35, 0)); [-1, 1].forEach(z => boatG.add(part(box(0.1, 1.1, 0.25), M("#232323"), 0, 0.9, z * 2.05)));
+    for (let i = -3; i <= 3; i++) boatG.add(part(box(0.02, 0.18, 0.18), M(i % 2 ? "#C8423B" : "#232323"), 0.93, 0.15, i * 0.5));
+    [-1.3, 1.3].forEach(x => piv.add(part(box(0.06, 2.6, 0.06), M("#888"), x * 0.5, -1.3, 0)));
+    g.rotation.y = Math.PI / 2; g.userData = { piv };
+    addRide("swing", "拼板舟大擺盪", "坐上蘭嶼達悟族拼板舟造型的大船，在空中前後擺盪，像在太平洋上乘風破浪！", -1.5, 8.2, g, 5.8); }
+  // 5. 山林旋轉木馬
+  { const g = new THREE.Group(), spin = new THREE.Group(); g.add(spin);
+    g.add(part(cyl(2.3, 2.4, 0.3, 24), M("#F7F1E3"), 0, 0.15, 0)); spin.add(part(cone(2.6, 1.2, 24), M("#C8423B"), 0, 3.3, 0)); spin.add(part(cyl(2.55, 2.55, 0.25, 24), M("#F2C14E"), 0, 2.6, 0));
+    spin.add(part(cyl(0.25, 0.25, 2.6, 10), M("#F2C14E"), 0, 1.4, 0));
+    const animals = [], acol = ["#E8C08A", "#C9935A", "#3B3B3B", "#F4F0E6", "#B07A48", "#E8C08A"];
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2, an = new THREE.Group(); an.position.set(Math.cos(a) * 1.7, 0.9, Math.sin(a) * 1.7); an.rotation.y = -a;
+      const body = part(sph(0.28, 10, 8), M(acol[i]), 0, 0, 0); body.scale.set(1, 0.8, 1.6); an.add(body); an.add(part(sph(0.16, 8, 6), M(acol[i]), 0, 0.2, 0.42));
+      an.add(part(cyl(0.025, 0.025, 1.7, 4), M("#F2C14E"), 0, 0.6, 0)); spin.add(an); animals.push(an); }
+    g.userData = { spin, animals };
+    addRide("carousel", "山林旋轉木馬", "騎上雲豹、山羌、帝雉這些臺灣山林的動物朋友，跟著音樂轉圈圈。", -5, -5, g, 4.6); }
+  // 6. 陶壺咖啡杯
+  { const g = new THREE.Group(), plate = new THREE.Group(); g.add(plate); plate.add(part(cyl(2.4, 2.4, 0.2, 28), M("#3E7D4F"), 0, 0.1, 0));
+    const cups = []; for (let i = 0; i < 4; i++) { const a = i / 4 * Math.PI * 2, c = new THREE.Group(); c.position.set(Math.cos(a) * 1.4, 0.2, Math.sin(a) * 1.4);
+      const jar = part(sph(0.55, 14, 10), M(["#C8423B", "#E8B33A", "#2F7FC1", "#8A5CC2"][i]), 0, 0.45, 0); jar.scale.y = 0.85; c.add(jar); c.add(part(cyl(0.3, 0.38, 0.25, 12), M("#8A5A3A"), 0, 0.95, 0));
+      for (let k = 0; k < 6; k++) { const b = part(box(0.12, 0.12, 0.02), M("#FFFFFF"), Math.cos(k) * 0.56, 0.45, Math.sin(k) * 0.56); b.rotation.y = -k; c.add(b); } plate.add(c); cups.push(c); }
+    g.userData = { plate, cups };
+    addRide("cups", "陶壺咖啡杯", "坐進排灣族陶壺造型的杯子，轉轉轉，轉得越快越好玩！", 1, 1, g, 2.6); }
+  // 樂園燈串
+  PARK.lights = [];
+  for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2, s = glow(["#FFD27A", "#FF8FB0", "#8FD3FF"][i % 3], 0.9); s.position.copy(parkLocal(Math.cos(a) * 10.5, 2.4, Math.sin(a) * 10.5)); scene.add(s); PARK.lights.push(s); }
+  const an = new THREE.Object3D(); an.position.copy(parkLocal(-10.6, 5.6, 0)); scene.add(an);
+  PARK.mainLabel = addLabel(an, 0, "plain", { name: "🎡 " + PARK_NAME }, () => go("park"));
+  makeFerry();
+}
+/* ---------- 渡輪與船期 ---------- */
+function makeFerry() {
+  const out = HARBOR_POS.clone().normalize(), yaw = Math.atan2(out.x, out.z), side = new V3(Math.cos(yaw), 0, -Math.sin(yaw));
+  const dockH = HARBOR_POS.clone().addScaledVector(out, HARBOR_R + 2.2).addScaledVector(side, -1.9);
+  const dockP = parkLocal(-13.7, 0, -4.4);
+  const pts = [dockH, HARBOR_POS.clone().addScaledVector(out, 15), HARBOR_POS.clone().addScaledVector(out, 22).add(new V3(6, 0, 0)), new V3(48, 0, 38), new V3(60, 0, 31), dockP];
+  pts.forEach(p => { p.y = SEA_Y + 0.15; });
+  PARK.path = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.4);
+  const g = new THREE.Group();
+  const shape = new THREE.Shape(); shape.moveTo(-2.4, 0); shape.lineTo(2.0, 0); shape.lineTo(2.8, 0.9); shape.lineTo(-2.6, 0.9); shape.closePath();
+  const hg = new THREE.ExtrudeGeometry(shape, { depth: 1.8, bevelEnabled: false }); hg.translate(0, -0.4, -0.9); g.add(part(hg, M("#F7F4EC")));
+  g.add(part(box(5.0, 0.12, 1.85), M("#B5322A"), 0.1, 0.5, 0));
+  g.add(part(box(2.6, 1.0, 1.5), M("#FFFFFF"), -0.3, 1.05, 0)); g.add(part(box(2.8, 0.14, 1.65), M("#8A5CC2"), -0.3, 1.62, 0));
+  for (let i = 0; i < 5; i++) [-0.76, 0.76].forEach(z => g.add(part(box(0.32, 0.36, 0.02), winMat, -1.3 + i * 0.5, 1.1, z)));
+  g.add(part(cyl(0.18, 0.2, 0.9, 10), M("#F2C14E"), -1.1, 2.1, 0));
+  const flag = part(box(0.02, 0.4, 0.6), M("#E8B33A"), 1.0, 2.2, 0); g.add(flag); g.add(part(cyl(0.02, 0.02, 1.0, 4), M("#888"), 1.0, 1.9, 0.3));
+  const lamp = glow("#FFF2C0", 1.2); lamp.position.set(2.6, 0.9, 0); g.add(lamp); g.userData.lamp = lamp;
+  const hit = new THREE.Mesh(box(5.4, 2.6, 2.2), new THREE.MeshBasicMaterial({ visible: false })); hit.position.y = 0.9; hit.userData = { pick: true, type: "ferry" }; g.add(hit); pickables.push(hit);
+  const an = new THREE.Object3D(); an.position.set(0, 3.0, 0); g.add(an); PARK.ferryLabel = addLabel(an, 0, "ferry", {}, () => go("park"));
+  scene.add(g); PARK.ferry = g;
+}
+function ferrySec() { return trainSec(); }   // 和小火車一樣用臺灣真實時間（時光機也適用）
+function ferryState(sec) {
+  sec = sec == null ? ferrySec() : sec;
+  if (sec < FERRY.OPEN - FERRY.BOARD || sec >= FERRY.CLOSE) return { closed: true, phase: "closed", at: "harbor", sec };
+  const k = Math.floor((sec - FERRY.OPEN + FERRY.BOARD) / FERRY.C), u = (sec - FERRY.OPEN + FERRY.BOARD) - k * FERRY.C;
+  const depart = FERRY.OPEN + k * FERRY.C, B = FERRY.BOARD, S = FERRY.SAIL, C = FERRY.C;
+  if (u < B) return depart >= FERRY.CLOSE ? { closed: true, phase: "closed", at: "harbor", sec } : { phase: "boardH", at: "harbor", left: B - u, depart, u, sec };
+  if (u < B + S) return { phase: "toPark", x: (u - B) / S, left: B + S - u, depart, u, sec };
+  if (u < C - S - B) return { phase: "dockP", at: "park", left: C - S - B - u, u, depart, sec };
+  if (u < C - S) return { phase: "boardP", at: "park", left: C - S - u, u, depart, sec };
+  return { phase: "toHarbor", x: (u - (C - S)) / S, left: C - u, u, depart, sec };
+}
+const hhmm = s => { s = Math.round(s); return String(Math.floor(s / 3600) % 24).padStart(2, "0") + ":" + String(Math.floor(s % 3600 / 60)).padStart(2, "0"); };
+function nextDepartures(sec, n) {
+  const out = []; let k = Math.max(0, Math.ceil((sec - FERRY.OPEN) / FERRY.C));
+  while (out.length < n) { const t = FERRY.OPEN + k * FERRY.C; if (t >= FERRY.CLOSE) break; out.push(t); k++; }
+  return out;
+}
+const _fq = new V3(), _ft = new V3();
+function stepFerry(dt) {
+  if (!PARK.ferry) return;
+  const st = ferryState(); PARK.fst = st;
+  let u;
+  if (st.phase === "closed" || st.at === "harbor") u = 0;
+  else if (st.at === "park") u = 1;
+  else { const e = (1 - Math.cos(Math.PI * st.x)) / 2; u = st.phase === "toPark" ? e : 1 - e; }
+  PARK.path.getPointAt(u, _fq); PARK.path.getTangentAt(Math.min(0.999, Math.max(0.001, u)), _ft);
+  if (st.phase === "toHarbor") _ft.negate();
+  const t = PARK.clock = (PARK.clock || 0) + dt;
+  PARK.ferry.position.set(_fq.x, _fq.y + Math.sin(t * 1.3) * 0.08, _fq.z);
+  if (st.phase === "toPark" || st.phase === "toHarbor" || !PARK.ferryYaw) PARK.ferryYaw = Math.atan2(_ft.x, _ft.z) - Math.PI / 2;
+  PARK.ferry.rotation.y = PARK.ferryYaw; PARK.ferry.rotation.z = Math.sin(t * 0.9) * 0.03;
+  PARK.ferry.userData.lamp.visible = S.dark > 0.35 && !st.closed;
+  stepBascule(dt);
+  if (PARK.boarded) stepFerryRide(st);
+  else if (PARK.wait) stepWait(st);
+}
+/* ---------- 遊樂設施動畫 ---------- */
+const parkOpen = () => { const s = ferrySec(); return s >= FERRY.OPEN && s < FERRY.CLOSE; };
+function stepPark(dt) {
+  if (!PARK.dyn) return;
+  const t = PARK.t = (PARK.t || 0) + dt, open = parkOpen(), R = PARK.rides;
+  PARK.lights.forEach((s, i) => { s.visible = S.dark > 0.3; s.material.opacity = 0.7 + 0.3 * Math.sin(t * 3 + i); });
+  if (!open && !PARK.ride) return;
+  const w = R.wheel.obj.userData; w.wheel.rotation.z = t * 0.12; w.gons.forEach((g, i) => { const a = i / 12 * Math.PI * 2 + t * 0.12; g.position.set(Math.cos(a) * 4.3, Math.sin(a) * 4.3, 0); });
+  const c = R.coaster.obj.userData; c.u = ((c.u || 0) + dt * (0.05 + 0.04 * Math.max(0, -(c.slope || 0)))) % 1;
+  c.cars.forEach((car, k) => { const uu = (c.u - k * 0.012 + 1) % 1, p = c.curve.getPointAt(uu), tg = c.curve.getTangentAt(uu); car.position.copy(p); car.lookAt(p.clone().add(tg)); if (k === 0) c.slope = tg.y; });
+  const d = R.drop.obj.userData, cyc = (t % 14) / 14; d.ring.position.y = cyc < 0.45 ? 1 + 8.2 * (cyc / 0.45) : cyc < 0.6 ? 9.2 : cyc < 0.68 ? 9.2 - 8.2 * Math.pow((cyc - 0.6) / 0.08, 2) : 1;
+  R.swing.obj.userData.piv.rotation.z = Math.sin(t * 1.1) * (0.6 + 0.4 * Math.sin(t * 0.13));
+  const ca = R.carousel.obj.userData; ca.spin.rotation.y = t * 0.6; ca.animals.forEach((a, i) => { a.position.y = 0.9 + Math.sin(t * 3 + i) * 0.25; });
+  const cu = R.cups.obj.userData; cu.plate.rotation.y = t * 0.5; cu.cups.forEach((c2, i) => { c2.rotation.y = t * (1.6 + i * 0.3); });
+}
+/* ---------- 乘坐設施（鏡頭體驗） ---------- */
+function openRide(key) {
+  const r = PARK.rides[key]; if (!r) return;
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  const can = PARK.inPark || previewMode, open = parkOpen();
+  openModal('<div class="npc-card" style="--s:#8A5CC2"><button class="m-close" aria-label="關閉">×</button>' +
+    '<div class="npc-head"><div class="npc-ava park">' + ({ wheel: "🎡", coaster: "🎢", drop: "🐟", swing: "🛶", carousel: "🐆", cups: "🏺" }[key]) + '</div><div><small>' + PARK_NAME + '</small><h2>' + esc(r.name) + '</h2></div></div>' +
+    '<div class="npc-bubble">' + esc(r.desc) + '</div>' +
+    '<div class="row npc-act">' + (!open ? '<span class="tc-soon">樂園營業時間 08:00–20:00</span>' : can ? '<button class="btn" id="rideGo">🎟 搭乘</button>' : '<span class="small">要先搭渡輪、驗票進樂園才能搭乘喔！</span><button class="btn ghost" data-go="park">看船期與門票</button>') + '</div></div>', "npc-sheet");
+  $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
+  const g = $("#rideGo"); if (g) g.addEventListener("click", () => startParkRide(key));
+}
+function startParkRide(key) {
+  closeModal(); stopTour(); if (!panelMin() && hasPanel()) setPanelMin(true, false);
+  PARK.ride = { key, t: 0, dur: { wheel: 26, coaster: 22, drop: 16, swing: 16, carousel: 14, cups: 12 }[key] };
+  tween.active = false; controls.enabled = false;
+  let chip = $("#parkChip"); if (!chip) { chip = document.createElement("div"); chip.id = "parkChip"; chip.className = "ride-chip"; $("#app").appendChild(chip); }
+  chip.hidden = false; chip.innerHTML = '<span>' + esc(PARK.rides[key].name) + '：搭乘中</span><button class="btn sm" id="parkRideOff">離開</button>';
+  $("#parkRideOff").addEventListener("click", endParkRide);
+  speak(PARK.rides[key].name + "，出發！");
+}
+function endParkRide() {
+  if (!PARK.ride) return; PARK.ride = null; controls.enabled = true;
+  const c = $("#parkChip"); if (c) c.hidden = true;
+  focus.flyKey = ""; flyTo(parkPose(), 1.2);
+}
+const _pc = new V3(), _pt = new V3();
+function stepParkRide(dt) {
+  const R = PARK.ride; if (!R) return;
+  R.t += dt; if (R.t > R.dur) { endParkRide(); return; }
+  const rd = PARK.rides[R.key], base = PARK.pos.clone().add(rd.local), ud = rd.obj.userData;
+  if (R.key === "wheel") { const g = ud.gons[0]; g.getWorldPosition(_pc); _pc.y += 0.2; camera.position.copy(_pc).add(new V3(0, 0, 0.9)); _pt.set(0, 3, 0); }
+  else if (R.key === "coaster") { const car = ud.cars[0]; car.getWorldPosition(_pc); const tg = new V3(0, 0, 1).applyQuaternion(car.getWorldQuaternion(new THREE.Quaternion())); camera.position.copy(_pc).add(new V3(0, 0.7, 0)).addScaledVector(tg, -0.6); _pt.copy(_pc).addScaledVector(tg, 6).add(new V3(0, 0.3, 0)); }
+  else if (R.key === "drop") { ud.ring.getWorldPosition(_pc); camera.position.copy(_pc).add(new V3(-1.3, 0.2, 0)); _pt.set(0, 2 + ud.ring.position.y * 0.6, 0); }
+  else if (R.key === "swing") { const p = ud.piv; p.children[0].getWorldPosition(_pc); camera.position.copy(_pc).add(new V3(0, 1.2, 0)); _pt.set(0, 4 + 30 * Math.sin(p.rotation.z), 0); }
+  else if (R.key === "carousel") { ud.animals[0].getWorldPosition(_pc); camera.position.copy(_pc).add(new V3(0, 0.8, 0)); const a = ud.spin.rotation.y; _pt.copy(_pc).add(new V3(Math.sin(-a) * 10, -0.5, Math.cos(-a) * 10)); }
+  else { ud.cups[0].getWorldPosition(_pc); const a = ud.cups[0].rotation.y + ud.plate.rotation.y; camera.position.copy(_pc).add(new V3(0, 1.3, 0)); _pt.copy(_pc).add(new V3(Math.cos(a) * 10, -0.6, Math.sin(a) * 10)); }
+  controls.target.copy(_pt); camera.lookAt(_pt);
+}
+/* ---------- 船期看板、驗票、搭渡輪 ---------- */
+function parkPose() { const t = PARK.pos.clone().add(new V3(0, 2, 0)), p = PARK.pos.clone().add(new V3(-22, isMobile() ? 34 : 24, isMobile() ? 40 : 30)); shiftForPanel(t, p); return { target: t, pos: p }; }
+function harborDockPose() { const d = PARK.path.getPointAt(0), out = HARBOR_POS.clone().normalize(); return { target: d.clone().add(new V3(0, 2, 0)), pos: d.clone().addScaledVector(out, -10).add(new V3(-6, 9, 8)) }; }
+function ferryBoardHTML() {
+  const st = PARK.fst || ferryState(), tk = parkTickets(), sec = st.sec;
+  let s;
+  if (st.closed) s = "今日停航。樂園營業 08:00–20:00，首班船 08:00 從工具港開出。";
+  else if (st.phase === "boardH") s = "⛴ 渡輪停靠<b>工具港碼頭</b>，開放上船中！<b>" + Math.ceil(st.left) + " 秒</b>後開船";
+  else if (st.phase === "toPark") s = "⛴ 開往樂園中，約 " + Math.ceil(st.left) + " 秒抵達";
+  else if (st.phase === "dockP") s = "⛴ 停靠<b>樂園碼頭</b>，" + Math.ceil(st.left) + " 秒後開放回程上船";
+  else if (st.phase === "boardP") s = "⛴ 樂園碼頭開放上船（回程），<b>" + Math.ceil(st.left) + " 秒</b>後開船";
+  else s = "⛴ 回程中，約 " + Math.ceil(st.left) + " 秒回到工具港";
+  const deps = nextDepartures(sec, 4);
+  return '<p class="tr-pos">' + s + '</p>' +
+    '<div class="ticket-line">🎟 你的門票：<b>' + (previewMode ? "老師預覽（免票）" : tk + " 張") + '</b><small>第 1 張學習證書送 1 張體驗券，之後每 2 張證書再換 1 張</small></div>' +
+    '<h3>⛴ 船期表（工具港 → 樂園）</h3><div class="dep-list">' + (deps.length ? deps.map((d, i) => '<span class="dep' + (i === 0 ? " next" : "") + '">' + hhmm(d) + (i === 0 && st.phase === "boardH" ? " 上船中" : "") + '</span>').join("") : '<span class="dep">今日已無班次</span>') + '</div>' +
+    '<p class="small">每 6 分鐘一班，航程約 1 分 30 秒；開船前 1 分鐘開放上船，上船要驗票。回程船在樂園碼頭，開船前 1 分鐘開放上船。</p>';
+}
+function panelPark(quiet) {
+  const ridesHTML = Object.keys(PARK.rides).map(k => { const r = PARK.rides[k]; return '<button class="tr-row" data-ride="' + k + '"><i style="background:#8A5CC2"></i><b>' + esc(r.name) + '</b><span class="tr-pill">' + (PARK.inPark || previewMode ? "搭乘" : "介紹") + '</span></button>'; }).join("");
+  openPanel('<div class="p-top"><span class="crumb">嘉蘭樂學島．衛星島</span><button class="p-close" aria-label="關閉">×</button></div>' +
+    '<h2 style="--c:#8A5CC2"><i class="dot"></i>🎡 ' + PARK_NAME + '</h2><p class="p-lede">努力學習的獎勵！從<b>工具港</b>搭渡輪出海，驗票後就能在樂園裡玩摩天輪、雲霄飛車和更多設施。' + (PARK.inPark ? "<br>✅ 你已經在樂園裡了！" : "") + '</p>' +
+    '<div id="ferryBoard">' + ferryBoardHTML() + '</div>' +
+    '<div class="row" style="margin:12px 0" id="ferryAct"></div><h3>🎢 遊樂設施</h3><div class="tr-rows">' + ridesHTML + '</div>', "subject");
+  $all("[data-ride]").forEach(b => b.addEventListener("click", () => openRide(b.getAttribute("data-ride"))));
+  const act = () => {
+    const box = $("#ferryAct"); if (!box) return; const st = PARK.fst || ferryState();
+    let h;
+    if (PARK.inPark && st.closed) h = '<button class="btn" id="fHome">⛴ 搭夜間接駁船回樂學島</button>';
+    else if (PARK.inPark) h = st.phase === "boardP" ? '<button class="btn" id="fBack">⛴ 搭船回樂學島</button>' : '<button class="btn ghost" id="fWaitBack">到樂園碼頭等回程船</button>';
+    else h = st.phase === "boardH" ? '<button class="btn" id="fBoard">🎟 驗票上船</button>' : '<button class="btn ghost" id="fWait">到工具港碼頭等船</button>';
+    if (box.dataset.h !== h) { box.dataset.h = h; box.innerHTML = h;
+      const b1 = $("#fBoard"), b2 = $("#fWait"), b3 = $("#fBack"), b4 = $("#fWaitBack");
+      if (b1) b1.addEventListener("click", ticketCheck); if (b2) b2.addEventListener("click", () => startWait(false));
+      if (b3) b3.addEventListener("click", boardBack); if (b4) b4.addEventListener("click", () => startWait(true));
+      const b5 = $("#fHome"); if (b5) b5.addEventListener("click", () => { PARK.inPark = false; go("tools"); }); }
+  };
+  act();
+  clearInterval(PARK.timer); PARK.timer = setInterval(() => { const b = $("#ferryBoard"); if (!b || focus.g !== 9) { clearInterval(PARK.timer); return; } b.innerHTML = ferryBoardHTML(); act(); }, 1000);
+  if (!quiet) speak(PARK_NAME + "。");
+}
+function ticketCheck() {
+  const st = PARK.fst || ferryState(); if (st.phase !== "boardH") { toast("現在不是上船時間，請看船期表。"); return; }
+  if (!previewMode && parkTickets() < 1) {
+    modalBack = (location.hash || "#home").replace(/^#/, "");
+    openModal('<div class="npc-card" style="--s:#8A5CC2"><button class="m-close" aria-label="關閉">×</button><div class="ticket-check fail"><div class="tk-ic">🎟</div><h2>驗票：還沒有門票</h2><p>第 1 張學習證書就能換到樂園體驗券，之後每 2 張證書再換 1 張。去學習館完成挑戰關卡吧！</p><div class="row" style="justify-content:center"><button class="btn" data-go="certs">看我的證書</button></div></div></div>', "npc-sheet");
+    $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go")))); speak("驗票：還沒有門票喔。"); return;
+  }
+  const no = "JL-" + String(Math.floor(Math.random() * 90000) + 10000);
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  openModal('<div class="ticket-check"><div class="tk"><div class="tk-l"><small>' + PARK_NAME + '</small><b>樂園門票</b><span>No. ' + no + '</span><span>' + hhmm(st.depart) + ' 工具港 → 樂園</span></div><div class="tk-r">ADMIT<br>ONE</div><div class="tk-stamp">驗票通過</div></div><p>✅ 驗票通過，請上船！</p></div>', "npc-sheet");
+  playChime(); speak("驗票通過，請上船！");
+  setTimeout(() => { if (!previewMode) { const p = store("park") || {}; p.used = (p.used || 0) + 1; store("park", p); } boardFerry(false); }, 1800);
+}
+function boardBack() { const st = PARK.fst || ferryState(); if (st.phase !== "boardP") { toast("回程船還沒開放上船。"); return; } boardFerry(true); }
+function boardFerry(back) {
+  closeModal(); stopTour(); PARK.wait = false; if (RIDE.on) endRide(); if (!panelMin() && hasPanel()) setPanelMin(true, false);
+  PARK.boarded = { back }; tween.active = false; controls.enabled = false;
+  let chip = $("#parkChip"); if (!chip) { chip = document.createElement("div"); chip.id = "parkChip"; chip.className = "ride-chip"; $("#app").appendChild(chip); }
+  chip.hidden = false; chip.dataset.t = ""; trainHorn();
+}
+function stepFerryRide(st) {
+  const f = PARK.ferry, back = PARK.boarded.back, yaw = f.rotation.y + Math.PI / 2, fw = new V3(Math.sin(yaw), 0, Math.cos(yaw));
+  camera.position.copy(f.position).addScaledVector(fw, -10).add(new V3(0, 7.5, 0)); controls.target.copy(f.position).addScaledVector(fw, 14).add(new V3(0, 0.5, 0)); camera.lookAt(controls.target);
+  const chip = $("#parkChip"), sailing = st.phase === (back ? "toHarbor" : "toPark");
+  const txt = sailing ? "⛴ 航行中，約 " + Math.ceil(st.left) + " 秒抵達" + (back ? "工具港" : "樂園") : "⛴ 已上船，" + Math.ceil(st.left || 0) + " 秒後開船";
+  if (chip && chip.dataset.t !== txt) { chip.dataset.t = txt; chip.innerHTML = '<span>' + txt + '</span>'; }
+  const arrived = PARK.boarded.sailed && st.at === (back ? "harbor" : "park");
+  if (sailing) PARK.boarded.sailed = true;
+  if (arrived || st.closed) {
+    PARK.boarded = null; controls.enabled = true; if (chip) chip.hidden = true;
+    PARK.inPark = !back; trainHorn(); focus.flyKey = "";
+    if (back) { toast("回到樂學島工具港了！"); go("tools"); } else { toast("🎡 歡迎來到" + PARK_NAME + "！點遊樂設施就能搭乘。"); speak("歡迎來到" + PARK_NAME + "！"); go("park"); }
+  }
+}
+function startWait(back) {
+  closeModal(); PARK.wait = { back }; if (!panelMin() && hasPanel()) setPanelMin(true, false);
+  flyTo(back ? { target: PARK.path.getPointAt(1).add(new V3(0, 2, 0)), pos: PARK.path.getPointAt(1).add(new V3(-12, 9, 10)) } : harborDockPose(), 1.4);
+  let chip = $("#parkChip"); if (!chip) { chip = document.createElement("div"); chip.id = "parkChip"; chip.className = "ride-chip"; $("#app").appendChild(chip); }
+  chip.hidden = false; chip.dataset.t = "";
+}
+function stepWait(st) {
+  const chip = $("#parkChip"); if (!chip) return; const back = PARK.wait.back, can = st.phase === (back ? "boardP" : "boardH");
+  let txt;
+  if (st.closed) txt = "今日停航，明天 08:00 首班";
+  else if (can) txt = "⛴ 船來了！開放上船（" + Math.ceil(st.left) + " 秒後開船）";
+  else { const target = back ? FERRY.C - FERRY.SAIL - FERRY.BOARD : FERRY.C; let wait = (target - st.u + FERRY.C) % FERRY.C; txt = "⏳ 等" + (back ? "回程" : "") + "船中，約 " + mmss(wait) + " 後開放上船"; }
+  const key = txt.replace(/\d+/g, "#") + can;
+  if (chip.dataset.k !== key || chip.dataset.t !== txt) {
+    chip.dataset.t = txt;
+    if (chip.dataset.k !== key) { chip.dataset.k = key; chip.innerHTML = '<span id="waitTxt">' + txt + '</span>' + (can ? '<button class="btn sm" id="waitBoard">' + (back ? "上船" : "驗票上船") + '</button>' : "") + '<button class="btn sm ghost" id="waitCancel">取消</button>';
+      const b = $("#waitBoard"); if (b) b.addEventListener("click", () => { PARK.wait = false; back ? boardFerry(true) : ticketCheck(); });
+      $("#waitCancel").addEventListener("click", () => { PARK.wait = false; chip.hidden = true; }); }
+    else { const s = $("#waitTxt"); if (s) s.textContent = txt; }
+  }
+}
+
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -3987,6 +4532,7 @@ function refreshOpenState() {
     if (focus.key) panelSubject(focus.g, focus.key, true);
     else if (focus.g === 7) panelTools(true);
     else if (focus.g === 8) panelTrain(true);
+    else if (focus.g === 9) panelPark(true);
     else if (focus.g) panelIsland(focus.g);
     else if (focus.g === null) panelHome();
   }
@@ -4105,6 +4651,10 @@ function route() {
   closeModal();
   if (h !== "home") hideHero();
   if (h === "fireworks") { openFireworks(); return; }
+  if (h === "card") { openDailyCard(false); return; }
+  if (h === "cards") { openCardBook(); return; }
+  if (h === "park") { if (panelMin()) setPanelMin(false, false); focus.g = 9; focus.key = null; panelPark(); fly("park", parkPose); }
+  else
   if (h === "train") { if (panelMin()) setPanelMin(false, false); focus.g = 8; focus.key = null; panelTrain(); fly("train", trainViewPose); }
   else if (h === "tools") { if (panelMin()) setPanelMin(false, false); focus.g = 7; focus.key = null; panelTools(); fly("tools", harborPose); }
   else if (h === "hub") { focus.g = 0; focus.key = null; panelHub(); fly("hub", () => { const t = new V3(0, 0.6, 0), p = new V3(3, isMobile() ? 38 : 25, isMobile() ? 44 : 30); shiftForPanel(t, p); return { target: t, pos: p }; }); }
@@ -4400,7 +4950,7 @@ function start() {
     '<aside id="panel" class="panel-card" hidden></aside>' +
     '<button id="panelTab" class="panel-tab" type="button" aria-controls="panel" aria-expanded="true" title="收合卡片"><span class="pt-arrow" aria-hidden="true">›</span><span class="pt-label"></span></button>' +
     '<footer class="bar bar-bottom">' +
-      '<div class="foot-l"><span class="foot-ic">' + ico("book") + '</span><div class="foot-txt"><small>我的探索足跡</small><b><span id="footN">0</span><em> / <span id="footT">60</span></em></b></div><div class="foot-bar"><i id="footBar"></i></div><button class="foot-cert" id="certBtn" type="button" title="我的證書" aria-label="我的證書">🎓<b id="certN">0</b></button><button class="foot-cert" id="fwBtn" type="button" title="放煙火" aria-label="放煙火">🎆<b id="fwN">0</b></button><button class="foot-cert" id="paperBtn" type="button" title="今日島報" aria-label="今日島報">📰</button>' +
+      '<div class="foot-l"><span class="foot-ic">' + ico("book") + '</span><div class="foot-txt"><small>我的探索足跡</small><b><span id="footN">0</span><em> / <span id="footT">60</span></em></b></div><div class="foot-bar"><i id="footBar"></i></div><button class="foot-cert bag-btn" id="bagBtn" type="button" title="我的背包" aria-label="我的背包：證書、煙火、門票、島報、魔法卡" aria-haspopup="true">🎒<span>背包</span><b id="bagN">0</b></button>' +
         '<div class="foot-txt magpie"><small>台灣藍鵲</small><b id="birdCount">0 / 10</b></div></div>' +
       '<nav class="tools" aria-label="地圖工具">' +
         '<button class="tool wide vbtn on" data-view="pano">' + ico("home") + '<span>全景</span></button>' +
@@ -4418,15 +4968,16 @@ function start() {
       '</nav>' +
     '</footer>' +
     '<div class="card musicpop" id="musicPop" hidden role="dialog" aria-label="背景音樂"></div>' +
+    '<div class="card musicpop bagpop" id="bagPop" hidden role="menu" aria-label="我的背包"></div>' +
     '<div id="modal" hidden></div><div id="toast" class="toast" role="status"></div>';
   setQuote(quoteIdx);
   $("#heroQuote").addEventListener("click", () => setQuote(++quoteIdx));
   $all("#gradeSeg button").forEach(b => b.addEventListener("click", () => { stopTour(); const n = +b.getAttribute("data-g"); if (!n) { ui.view = "pano"; focus.flyKey = ""; } go(n ? "g" + n : "home"); }));
   $("#listBtn").addEventListener("click", () => go("list"));
   $("#teacherBtn").addEventListener("click", () => go("teacher"));
-  $("#certBtn").addEventListener("click", () => go("certs")); updateCertCount();
-  $("#paperBtn").addEventListener("click", () => openPaper(false));
-  $("#fwBtn").addEventListener("click", () => openFireworks()); updateFwCount();
+  $("#bagBtn").addEventListener("click", e => { e.stopPropagation(); toggleBag(); }); updateCertCount();
+  document.addEventListener("pointerdown", e => { const p = $("#bagPop"); if (p && !p.hidden && !p.contains(e.target) && !e.target.closest("#bagBtn")) toggleBag(false); });
+  updateFwCount(); updateCardCount();
   $("#guideBtn").addEventListener("click", () => go("guide"));
   lockPageScroll();
   $("#hostBtn").addEventListener("click", () => openNPC({ type: "host", name: HOST_NAME }));
@@ -4457,7 +5008,7 @@ function start() {
   updateHint(); updateFootprints(); applyTime(); loadWeather();
   addEventListener("hashchange", route); route();
   loadRegistry().then(() => { refreshOpenState(); if (location.hash === "#teacher" && teacherUnlocked()) openTeacher(); });
-  maybeDailyPaper();
+  maybeDailyPaper(); maybeDailyCard();
   if (!ok && !location.hash) go("list");
   else if (!store("guided") && (!location.hash || location.hash === "#home")) setTimeout(() => { if (!location.hash || location.hash === "#home") go("guide"); }, 1200);
   setInterval(() => { if (!override) applyTime(); }, 30000);
