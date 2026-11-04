@@ -2489,8 +2489,37 @@ function openTeacherGate() {
     const h = await passHash($("#gatePass").value || "");
     if (h !== teacherHash()) { $("#gateMsg").textContent = "通關密語不對，請再試一次。"; $("#gatePass").select(); return; }
     try { sessionStorage.setItem("jialan:teacherOK", h); if ($("#gateRemember").checked) localStorage.setItem("jialan:teacherOK", h); } catch (er) {}
-    openTeacher();
+    if (location.hash === "#cabinet") openCabinet(); else openTeacher();
   });
+}
+/* ---------- 教師工具櫃：分類、搜尋、開發者標示，工具越多也好找 ---------- */
+const CAB_ORDER = ["教學", "評量", "班級經營", "行政", "課務", "資訊", "其他"];
+const CAB_ICON = { 教學: "📚", 評量: "📝", 班級經營: "🏫", 行政: "🗂", 課務: "📅", 資訊: "💻", 其他: "🧰" };
+function openCabinet() {
+  if (!teacherUnlocked()) { openTeacherGate(); return; }
+  modalBack = "teacher";
+  const all = teacherTools(), cats = [...new Set(all.map(t => t.cat))].sort((a, b) => (CAB_ORDER.indexOf(a) + 99) % 99 - (CAB_ORDER.indexOf(b) + 99) % 99 || a.localeCompare(b));
+  let cat = "", q = "";
+  try { cat = sessionStorage.getItem("jialan:cabCat") || ""; if (!cats.includes(cat)) cat = ""; } catch (e) {}
+  openModal('<div class="m-head"><h1>🗄 教師工具櫃</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<p class="p-lede">嘉蘭國小老師使用的教學與行政工具。點「開啟」會在新分頁打開；有些工具會要求用學校 Google 帳號登入。</p>' +
+    '<div class="cab-bar"><input id="cabQ" type="search" placeholder="搜尋工具名稱、說明或開發者" aria-label="搜尋工具"><div class="cab-cats" role="tablist">' +
+      '<button class="pill" data-cat="">全部 ' + all.length + '</button>' + cats.map(c => '<button class="pill" data-cat="' + esc(c) + '">' + (CAB_ICON[c] || "🧰") + ' ' + esc(c) + ' ' + all.filter(t => t.cat === c).length + '</button>').join("") + '</div></div>' +
+    '<div id="cabList"></div>' +
+    '<section class="t-sec cab-how"><h2>➕ 怎麼放新工具進來？</h2><p class="small">在總表的「工具登記」分頁加一列：名稱、說明、網址、對象選「老師」、分類（例如教學、評量、班級經營、行政、課務、資訊）、開發者（自己或原作者），幾分鐘內工具櫃就會出現。別人開發的工具，請在「開發者」寫上原作者，並確認對方同意分享。</p></section>', "cabinet-sheet");
+  const draw = () => {
+    const kw = q.toLowerCase(), list = all.filter(t => (!cat || t.cat === cat) && (!kw || (t.name + t.desc + t.by + t.cat + t.note).toLowerCase().includes(kw)));
+    $all("[data-cat]").forEach(b => b.classList.toggle("on", b.getAttribute("data-cat") === cat));
+    const groups = cat ? [cat] : cats;
+    $("#cabList").innerHTML = list.length ? groups.map(c => { const ls = list.filter(t => t.cat === c); return ls.length ? '<h3 class="cab-h">' + (CAB_ICON[c] || "🧰") + ' ' + esc(c) + '</h3><div class="cab-grid">' + ls.map(t =>
+      '<div class="cab-card' + (t.url ? "" : " off") + '"><div class="cab-top"><span class="tc-ic">' + esc(t.icon) + '</span><div><b>' + esc(t.name) + '</b>' + (t.by ? '<small>開發：' + esc(t.by) + '</small>' : "") + '</div></div>' +
+      '<p>' + esc(t.desc || "") + '</p>' + (t.note ? '<p class="cab-note">💡 ' + esc(t.note) + '</p>' : "") +
+      '<div class="cab-foot">' + (t.login ? '<span class="cab-tag">🔐 ' + esc(t.login) + '</span>' : "<span></span>") + (t.url ? '<a class="btn sm" href="' + esc(t.url) + '" target="_blank" rel="noopener">開啟 ↗</a>' : '<span class="tc-soon">建造中</span>') + '</div></div>').join("") + '</div>' : ""; }).join("")
+      : '<div class="cert-empty">' + (all.length ? "找不到符合的工具，換個關鍵字試試。" : "工具櫃還是空的。照下面的說明，在總表加入第一個工具吧！") + '</div>';
+  };
+  $("#cabQ").addEventListener("input", e => { q = e.target.value.trim(); draw(); });
+  $all("[data-cat]").forEach(b => b.addEventListener("click", () => { cat = b.getAttribute("data-cat"); try { sessionStorage.setItem("jialan:cabCat", cat); } catch (e) {} draw(); }));
+  draw();
 }
 function openTeacher() {
   if (!teacherUnlocked()) return openTeacherGate();
@@ -2510,10 +2539,9 @@ function openTeacher() {
   }).join("");
   const tt = teacherTools();
   openModal('<div class="m-head"><h1>老師專區</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<section class="t-sec cab-entry"><div><h2>🗄 教師工具櫃</h2><p class="small">學校老師自己或他人開發的教學、行政工具都收在這裡，共 <b>' + tt.length + '</b> 項。學生在島上看不到。</p></div><button class="btn" data-go="cabinet" type="button">打開工具櫃 →</button></section>' +
     '<section class="t-sec"><h2>© 版權提醒</h2><p class="small">出版社同意教材供教師教學及學生學習使用，但著作權仍屬出版社。製作教材時請：① 在總表「建物登記」填好「版本」（翰林／南一／康軒／自編），網站會自動在每一課加上版權標示；② 只整理重點、生字和自編題目，不要上傳課本或習作的整份掃描檔。<a href="#copyright">看版權聲明</a></p></section>' +
     '<section class="t-sec"><h2>🎆 示範用</h2><p class="small">上課展示時，可以免費試放煙火（不會扣學生的次數），或打開環島小火車的即時看板。</p><div class="row"><button class="btn ghost" id="tFw" type="button">試放煙火</button><button class="btn ghost" data-go="train" type="button">小火車即時動態</button></div></section>' +
-    '<section class="t-sec"><h2>🗂 行政工具</h2><p class="small">只放在老師專區，學生在島上看不到。要新增工具，在總表的「工具登記」分頁加一列，「對象」選「老師」就好。</p>' +
-    (tt.length ? '<div class="tool-list">' + tt.map(t => toolCard(t)).join("") + '</div>' : '<p class="small">目前還沒有登記行政工具。</p>') + '</section>' +
     '<section class="t-sec"><h2>預覽模式</h2><p class="small">打開後，總表或課次「上線」選「否」的內容也會顯示，方便上線前檢查。只影響這台裝置，關掉分頁就恢復。</p>' +
     '<button class="btn' + (previewMode ? "" : " ghost") + '" id="pvMode">' + (previewMode ? "預覽模式：開啟中（點一下關閉）" : "開啟預覽模式") + '</button></section>' +
     '<section class="t-sec"><h2>教材試算表連線檢查</h2><p class="small">' + esc(regMsg) + '</p>' +
@@ -3420,15 +3448,16 @@ const TOOL_BLD = ["tower", "clock", "atelier", "math", "academy", "dome"];
 const TOOLS = { list: [], loaded: false, huts: [], group: null };
 function normTool(t, i) {
   const who = /老師|教師|行政/.test(t.who || "") ? "老師" : "學生";
-  return { name: t.name || "", desc: t.desc || "", url: safeUrl(t.url || "") || "", who, icon: t.icon || (who === "老師" ? "🗂" : "🧰"), live: t.live !== false, i };
+  return { name: t.name || "", desc: t.desc || "", url: safeUrl(t.url || "") || "", who, icon: t.icon || (who === "老師" ? "🗂" : "🧰"), live: t.live !== false, i,
+    cat: (t.cat || "").trim() || (who === "老師" ? "其他" : ""), by: (t.by || "").trim(), note: (t.note || "").trim(), login: (t.login || "").trim() };
 }
 function loadTools() {
   const local = (window.JIALAN_TOOLS || []).map(normTool);
   const id = sheetId(CFG.masterSheet);
-  const done = list => { TOOLS.list = list.filter(t => t.name && (t.live || previewMode)).map((t, i) => Object.assign(t, { i })); TOOLS.loaded = true; buildToolHuts(); return TOOLS.list; };
+  const done = list => { TOOLS.list = list.filter(t => t.name && (t.live || previewMode)).map((t, i) => Object.assign(t, { i })); TOOLS.loaded = true; buildToolHuts(); if (location.hash === "#cabinet" && teacherUnlocked()) openCabinet(); return TOOLS.list; };
   if (!id) return Promise.resolve(done(local));
   return fetchTab(id, "工具登記").then(rows => {
-    const list = rows.map(r => normTool({ name: TXT(r["名稱"]), desc: TXT(r["說明"]), url: TXT(r["網址"]), who: TXT(r["對象"]), icon: TXT(r["圖示"]), live: TXT(r["上線"]) !== "否" }));
+    const list = rows.map(r => normTool({ name: TXT(r["名稱"]), desc: TXT(r["說明"]), url: TXT(r["網址"]), who: TXT(r["對象"]), icon: TXT(r["圖示"]), live: TXT(r["上線"]) !== "否", cat: TXT(r["分類"]), by: TXT(r["開發者"]), note: TXT(r["備註"]), login: TXT(r["登入"]) }));
     return done(list.length ? list : local);
   }).catch(() => done(local));
 }
@@ -4643,6 +4672,7 @@ function route() {
   const h = (location.hash || "").replace(/^#/, "") || "home";
   let m;
   if (h === "teacher") { openTeacher(); return; }
+  if (h === "cabinet") { openCabinet(); return; }
   if (h === "list") { openList(); return; }
   if (h === "copyright") { openCopyright(); return; }
   if (h === "certs") { openCerts(); return; }

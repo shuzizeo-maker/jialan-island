@@ -758,3 +758,24 @@ pre.code { background: #1F2A28; color: #E9F2E6; padding: 10px 12px; border-radiu
 .bag-item small { color: var(--ink-soft); }
 @media (max-width: 760px) { .bag-btn span { display: none; } }
 .bagpop[hidden] { display: none; }
+
+/* ---------- 教師工具櫃 ---------- */
+.cab-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: linear-gradient(135deg, #F3EEE2, #E6F0EE); }
+.cabinet-sheet { max-width: 980px; margin: 0 auto; width: 100%; }
+.cab-bar { position: sticky; top: -18px; z-index: 2; background: var(--paper); padding: 8px 0 10px; display: grid; gap: 8px; }
+.cab-bar input { font: inherit; font-size: 1rem; padding: 10px 14px; min-height: 44px; border-radius: 12px; border: 2px solid var(--line); background: var(--card-solid); color: var(--ink); }
+.cab-bar input:focus { outline: none; border-color: var(--pacific); }
+.cab-cats { display: flex; flex-wrap: wrap; gap: 6px; }
+.cab-h { margin: 16px 0 8px; font-size: 1.05rem; }
+.cab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.cab-card { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--card-solid); }
+.cab-card.off { opacity: .75; border-style: dashed; }
+.cab-top { display: grid; grid-template-columns: 48px 1fr; gap: 10px; align-items: center; }
+.cab-top b { display: block; font-size: 1.05rem; line-height: 1.35; }
+.cab-top small { color: var(--ink-soft); font-size: .78rem; }
+.cab-card p { margin: 0; color: var(--ink-soft); font-size: .9rem; line-height: 1.6; flex: 1; }
+.cab-card p.cab-note { flex: none; font-size: .82rem; }
+.cab-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
+.cab-foot .btn.sm { min-height: 36px; padding: 4px 14px; font-size: .9rem; background: #17607A; }
+.cab-tag { font-size: .75rem; background: #EEF3F1; padding: 2px 8px; border-radius: 999px; }
+.cab-how { margin-top: 18px; }
