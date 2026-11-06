@@ -779,3 +779,37 @@ pre.code { background: #1F2A28; color: #E9F2E6; padding: 10px 12px; border-radiu
 .cab-foot .btn.sm { min-height: 36px; padding: 4px 14px; font-size: .9rem; background: #17607A; }
 .cab-tag { font-size: .75rem; background: #EEF3F1; padding: 2px 8px; border-radius: 999px; }
 .cab-how { margin-top: 18px; }
+
+/* ---------- 飆速卡丁車 ---------- */
+.kart-go { width: 100%; justify-content: center; font-size: 1.15rem; min-height: 52px; background: #D3322B; margin: 6px 0 4px; }
+.kart-game { position: fixed; inset: 0; z-index: 80; background: #6DB052; touch-action: none; user-select: none; -webkit-user-select: none; }
+.kart-game canvas { width: 100%; height: 100%; display: block; }
+.kg-hud { position: absolute; top: 12px; left: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+.kg-box { background: rgba(20,30,40,.6); color: #fff; border-radius: 12px; padding: 4px 12px; display: grid; text-align: center; min-width: 64px; }
+.kg-box small { font-size: .7rem; opacity: .8; } .kg-box b { font: 800 1.3rem Georgia, "Noto Sans TC", sans-serif; }
+.kg-item b { font-size: 1.5rem; }
+.kg-exit { position: absolute; top: 12px; right: 12px; z-index: 2; border: 0; border-radius: 999px; padding: 8px 14px; background: rgba(255,255,255,.9); font: inherit; font-weight: 700; cursor: pointer; }
+.kg-msg { position: absolute; left: 50%; top: 32%; transform: translate(-50%, -50%) scale(.6); font: 900 clamp(2rem, 8vw, 4.5rem) "Noto Sans TC", sans-serif; color: #fff; text-shadow: 0 4px 0 #B5322A, 0 8px 18px rgba(0,0,0,.4); opacity: 0; transition: opacity .2s, transform .25s; pointer-events: none; white-space: nowrap; }
+.kg-msg.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.kg-pad { position: absolute; bottom: 16px; display: flex; gap: 10px; }
+.kg-pad.left { left: 16px; } .kg-pad.right { right: 16px; }
+.kg-pad button { width: 76px; height: 76px; border-radius: 50%; border: 3px solid rgba(255,255,255,.85); background: rgba(20,30,40,.45); color: #fff; font-size: 1.8rem; display: grid; place-items: center; align-content: center; cursor: pointer; touch-action: none; }
+.kg-pad button small { font-size: .7rem; }
+.kg-pad button:active { background: rgba(242,193,78,.8); }
+.kg-result { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; background: rgba(15,25,35,.72); color: #fff; padding: 20px; text-align: center; }
+.kg-result h2 { font-size: 2.2rem; margin: 0; }
+.kg-rank { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; min-width: min(360px, 86vw); }
+.kg-rank li { display: grid; grid-template-columns: 16px 1fr auto; gap: 10px; align-items: center; padding: 8px 14px; border-radius: 12px; background: rgba(255,255,255,.12); counter-increment: r; }
+.kg-rank li.me { background: rgba(242,193,78,.35); outline: 2px solid #F2C14E; }
+.kg-rank li i { width: 14px; height: 14px; border-radius: 50%; }
+.kg-rank li b::before { content: counter(r) ". "; }
+.kg-best b { color: #F2C14E; }
+.kg-reward { background: rgba(255,255,255,.95); color: #2B2B2B; padding: 12px 18px; border-radius: 14px; max-width: 420px; line-height: 1.7; }
+.kg-reward small { color: #666; display: block; } .kg-reward.no { background: rgba(255,255,255,.18); color: #fff; }
+@media (max-width: 760px) { .kg-pad button { width: 64px; height: 64px; font-size: 1.5rem; } .kg-box { min-width: 52px; padding: 2px 8px; } .kg-box b { font-size: 1.05rem; } }
+@media (hover: hover) and (pointer: fine) { .kg-pad { opacity: .55; } }
+
+.kg-result[hidden] { display: none; }
+.kg-assist { right: 110px; font-size: .85rem; }
+@media (max-width: 760px) { .kg-assist { top: 64px; right: 12px; } }
+.kg-result .btn.ghost { color: #fff; border-color: rgba(255,255,255,.7); }

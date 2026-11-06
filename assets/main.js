@@ -2025,6 +2025,7 @@ function onPick(u) {
   if (u.type === "train") return go("train");
   if (u.type === "ride") return openRide(u.key);
   if (u.type === "park" || u.type === "ferry") return go("park");
+  if (u.type === "kart") return go("kart");
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2066,7 +2067,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2078,8 +2079,9 @@ function initWorld() {
   addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.fov = camera.aspect < 0.8 ? 62 : 50; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); const pp = $("#panel"); if (pp && !pp.hidden) document.body.style.setProperty("--ph", pp.offsetHeight + "px"); });
   let last = performance.now(), time = 0;
   renderer.setAnimationLoop(() => {
+    if (KG.on) { last = performance.now(); return; }   // 玩卡丁車時暫停 3D 畫面，省電又順暢
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now; time += ui.paused ? 0 : dt;
-    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt);
+    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt);
     scene.children.forEach(o => { if (o.userData.follow) o.position.copy(camera.position); });
     if (sunMesh.userData.dir) sunMesh.position.copy(camera.position).addScaledVector(sunMesh.userData.dir, 600);
     if (moonSprite.userData.dir) moonSprite.position.copy(camera.position).addScaledVector(moonSprite.userData.dir, 580);
@@ -2588,6 +2590,7 @@ function saveCert(pk, L, score, total, stars) {
 function bagItems() {
   return [["🎓", "我的證書", Object.keys(store("certs") || {}).length + " 張", () => go("certs")],
     ["🎆", "放煙火", fwTokens() + " 次", () => openFireworks()],
+    ["🧩", "拼圖碎片", Object.keys(puzzlePieces()).length + " 片", () => go("kart")],
     ["🎟", "樂園門票", (typeof parkTickets === "function" ? parkTickets() : 0) + " 張", () => go("park")],
     ["🃏", "今日魔法卡", "卡冊 " + cardBook().length + " 張", () => openDailyCard(false)],
     ["📰", "今日島報", "", () => openPaper(false)]];
@@ -3093,6 +3096,7 @@ const HOST_FAQ = [
   { q: "今晚有流星雨嗎？", k: ["流星", "星星", "天文", "許願"], a: "", act: ["", "meteor"] },
   { q: "小火車怎麼搭？", k: ["火車", "小火車", "搭車", "車站", "坐車"], a: "環島小火車每天 06:00 到 22:00 繞著群島跑，停靠 8 個車站。點畫面上的「🚃 環島小火車」可以看即時動態，還能直接上車搭一圈！", act: ["看小火車即時動態", "train"] },
   { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。打開左下角的 🎒 背包，點「放煙火」，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
+  { q: "卡丁車怎麼玩？", k: ["卡丁車", "賽車", "比賽", "拼圖", "碎片", "開車"], a: "飆速卡丁車島在一年級島旁邊，走彩虹賽道橋就能到。和三位電腦對手比 3 圈，用 ◀ ▶ 轉彎、甩尾可以加速，跑進前三名就能拿到神秘拼圖碎片！", act: ["去卡丁車島", "kart"] },
   { q: "樂園怎麼去？", k: ["樂園", "遊樂園", "摩天輪", "雲霄飛車", "渡輪", "船", "門票", "玩"], a: "琉璃珠夢幻樂園在海上的衛星島。到工具港的碼頭搭渡輪，每 6 分鐘一班（08:00–20:00），上船要驗票。第 1 張學習證書送 1 張體驗券，之後每 2 張證書再換 1 張門票！", act: ["看船期與門票", "park"] },
   { q: "魔法卡是什麼？", k: ["魔法卡", "卡牌", "卡片", "抽卡", "心情", "卡冊"], a: "每天第一次上島可以抽一張魔法卡，上面有今天的心情、一句鼓勵的話和一個小任務。可以下載成圖片，也可以收進卡冊，打開左下角的 🎒 背包就能看。", act: ["看今天的魔法卡", "card"] },
   { q: "島報是什麼？", k: ["島報", "報紙", "新聞", "消息", "公告"], a: "每天第一次上島，島主會送來一份「嘉蘭樂學島島報」，有島上的活動、新開放的課和學習新聞。左下角 🎒 背包裡可以再看一次。", act: ["打開今日島報", "paper"] },
@@ -4505,6 +4509,310 @@ function stepWait(st) {
   }
 }
 
+/* ===================== 飆速卡丁車島：島上的賽車小遊戲（前三名可得拼圖碎片，供未來解謎關卡使用） ===================== */
+const KPOS = new V3(-84, 0, 6), KART_R = 11;
+const KI = { demo: [], group: null };
+function kartModel(col, s = 1) {
+  const g = new THREE.Group();
+  g.add(part(box(0.9, 0.18, 1.5), M(col), 0, 0.22, 0));
+  g.add(part(box(0.75, 0.1, 0.35), M(col), 0, 0.3, 0.85));
+  g.add(part(box(1.1, 0.06, 0.25), M("#222"), 0, 0.42, -0.78));
+  [[-0.5, 0.5], [0.5, 0.5], [-0.5, -0.5], [0.5, -0.5]].forEach(([x, z]) => g.add(part(cyl(0.2, 0.2, 0.18, 10), M("#1E1E1E"), x, 0.2, z, 0, 0, Math.PI / 2)));
+  g.add(part(sph(0.2, 10, 8), M("#F4F0E6"), 0, 0.62, -0.15));
+  g.add(part(sph(0.21, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), M(col), 0, 0.64, -0.15));
+  g.scale.setScalar(s); return g;
+}
+function makeKartIsland() {
+  const root = new THREE.Group();
+  floatingIsland(KART_R, 2.6, root, 0, 0, { type: "kart" });
+  // 橢圓賽道
+  const sh = new THREE.Shape(); sh.absellipse(0, 0, 8.6, 5.6, 0, Math.PI * 2, false, 0);
+  const hole = new THREE.Path(); hole.absellipse(0, 0, 6.2, 3.3, 0, Math.PI * 2, true, 0); sh.holes.push(hole);
+  const tg = new THREE.ShapeGeometry(sh, 64); tg.rotateX(-Math.PI / 2);
+  root.add(part(tg, M("#3C3F45"), 0, 0.03, 0));
+  for (let i = 0; i < 72; i++) { const a = i / 72 * Math.PI * 2; root.add(part(box(0.5, 0.06, 0.22), M(i % 2 ? "#FFFFFF" : "#D3322B"), Math.cos(a) * 8.75, 0.05, Math.sin(a) * 5.75, 0, -a + Math.PI / 2, 0)); }
+  for (let i = 0; i < 40; i++) { const a = i / 40 * Math.PI * 2; root.add(part(box(0.35, 0.06, 0.18), M(i % 2 ? "#FFFFFF" : "#D3322B"), Math.cos(a) * 6.05, 0.05, Math.sin(a) * 3.15, 0, -a + Math.PI / 2, 0)); }
+  // 起跑線與門架
+  const chk = canvasTex(256, 64, (x, w, h) => { for (let i = 0; i < 16; i++) for (let j = 0; j < 4; j++) { x.fillStyle = (i + j) % 2 ? "#111" : "#FFF"; x.fillRect(i * 16, j * 16, 16, 16); } });
+  const line = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.5), new THREE.MeshStandardMaterial({ map: chk })); line.rotation.x = -Math.PI / 2; line.rotation.z = Math.PI / 2; line.position.set(0, 0.06, 4.45); line.userData.noMerge = true; root.add(line);
+  [-1.5, 1.5].forEach(dz => root.add(part(cyl(0.1, 0.1, 3.0, 8), M("#D8D2C4"), 0, 1.5, 4.45 + dz)));
+  const banner = canvasTex(512, 96, (x, w, h) => { x.fillStyle = "#D3322B"; x.fillRect(0, 0, w, h); x.fillStyle = "#F2C14E"; x.fillRect(0, h - 10, w, 10); x.fillStyle = "#fff"; x.font = "bold 54px 'Noto Sans TC', sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("🏁 嘉蘭飆速卡丁車", w / 2, h / 2); });
+  const ban = tplane(3.2, 0.6, banner, 0, 2.9, 4.45, Math.PI / 2); ban.userData.noMerge = true; root.add(ban);
+  const ban2 = tplane(3.2, 0.6, banner, 0, 2.9, 4.45, -Math.PI / 2); ban2.userData.noMerge = true; root.add(ban2);
+  // 看臺
+  for (let r = 0; r < 4; r++) { root.add(part(box(7, 0.35, 0.7), M("#C9C2B2"), 0, 0.2 + r * 0.35, -7.4 - r * 0.6)); root.add(part(box(6.8, 0.12, 0.5), M(["#2F7FC1", "#F2C14E", "#E2573B", "#4E9F50"][r]), 0, 0.42 + r * 0.35, -7.4 - r * 0.6)); }
+  root.add(part(box(7.4, 0.12, 2.8), M("#B5322A"), 0, 2.5, -8.3)); [-3.5, 3.5].forEach(x => root.add(part(cyl(0.08, 0.08, 2.4, 6), M("#888"), x, 1.3, -9.5)));
+  // 頒獎臺
+  [[0, 0.9, "#F2C14E"], [-0.9, 0.6, "#C9CED6"], [0.9, 0.4, "#CD8B4E"]].forEach(([x, h, c]) => root.add(part(box(0.85, h, 0.85), M(c), x - 0.2, h / 2, -0.4)));
+  // 輪胎牆、路錐、排灣圖騰
+  [[9.6, 0], [-9.6, 0], [7.8, 4.8], [-7.8, -4.8], [7.8, -4.8], [-7.8, 4.8]].forEach(([x, z]) => { for (let k = 0; k < 3; k++) root.add(part(cyl(0.32, 0.32, 0.2, 12), M("#1E1E1E"), x, 0.1 + k * 0.2, z)); });
+  [-2.4, 2.4].forEach(x => { const tp = totemPillar(1.6, 0.3); tp.position.set(x, 0, 1.4); root.add(tp); });
+  const sb = signBoard("飆速卡丁車島", "#B5322A", 2.6); sb.position.set(9.6, 0, -4.2); sb.rotation.y = -Math.PI / 2.3; root.add(sb);
+  [[3.6, -9.4, "pine"], [-6.8, 8.2, "a"], [7.6, 7.2, "c"]].forEach(t => { const tr = tree(t[2], 1.1); tr.position.set(t[0], 0, t[1]); root.add(tr); });
+  mergeStatic(root); root.position.copy(KPOS); scene.add(root);
+  // 示範車：四台卡丁車繞場
+  KI.group = new THREE.Group(); KI.group.position.copy(KPOS); scene.add(KI.group);
+  ["#2F67C4", "#E2573B", "#F2C14E", "#4E9F50"].forEach((c, i) => { const k = kartModel(c, 0.9); KI.group.add(k); KI.demo.push({ k, a: i * 0.35, v: 0.42 - i * 0.03 }); });
+  // 彩虹賽道橋：一年級島 → 卡丁車島（拱起來，船可以從下面通過）
+  const g1 = ANG[0] * Math.PI / 180, gp = new V3(Math.cos(g1) * D, 0, Math.sin(g1) * D), th0 = Math.atan2(-gp.x, -gp.z);
+  let best = null;
+  for (let k = 0; k < SUBJECTS.length; k++) { const th = th0 + (36 + k * 32) * Math.PI / 180, p = gp.clone().add(new V3(Math.sin(th) * RI, 0, Math.cos(th) * RI)); const d = p.distanceTo(KPOS); if (!best || d < best.d) best = { p, d }; }
+  const dir = KPOS.clone().sub(best.p).normalize(), A = best.p.clone().addScaledVector(dir, RS - 0.3), B = KPOS.clone().addScaledVector(dir, -(KART_R - 0.3));
+  const br = new THREE.Group(), L = A.distanceTo(B), N = Math.round(L / 0.9), yaw = Math.atan2(dir.x, dir.z), RB = ["#E2573B", "#F2A33A", "#F2C14E", "#4E9F50", "#2F7FC1", "#8A5CC2"];
+  const yAt = t => Math.sin(Math.PI * t) * 6.5;
+  for (let i = 0; i < N; i++) {
+    const t0 = i / N, t1 = (i + 1) / N, p0 = A.clone().lerp(B, t0), p1 = A.clone().lerp(B, t1), y0 = yAt(t0), y1 = yAt(t1), mid = p0.clone().add(p1).multiplyScalar(0.5);
+    const seg = part(box(1.6, 0.16, L / N * 1.02), M("#4A4E55"), mid.x, (y0 + y1) / 2 + 0.05, mid.z); seg.rotation.set(-Math.atan2(y1 - y0, L / N), yaw, 0, "YXZ"); br.add(seg);
+    [-1, 1].forEach(sg => { const side = new V3(dir.z, 0, -dir.x).multiplyScalar(sg * 0.82), rl = part(box(0.08, 0.22, L / N * 1.02), M(RB[i % 6]), mid.x + side.x, (y0 + y1) / 2 + 0.2, mid.z + side.z); rl.rotation.copy(seg.rotation); br.add(rl); });
+    if (i % 6 === 3 && y0 > 1.5) br.add(part(cyl(0.18, 0.24, y0 - SEA_Y, 8), M("#D8D2C4"), mid.x, (y0 + SEA_Y) / 2, mid.z));
+  }
+  mergeStatic(br); scene.add(br);
+  const an = new THREE.Object3D(); an.position.copy(KPOS).add(new V3(0, 5.2, 0)); scene.add(an);
+  addLabel(an, 0, "plain", { name: "🏎 飆速卡丁車島" }, () => go("kart"));
+}
+function stepKartIsland(dt) {
+  if (!KI.demo.length || ui.paused) return;
+  KI.demo.forEach(d => { d.a += d.v * dt; const x = Math.cos(d.a) * 7.4, z = Math.sin(d.a) * 4.45; d.k.position.set(x, 0, z); d.k.rotation.y = Math.atan2(-Math.sin(d.a) * 7.4, Math.cos(d.a) * 4.45) + Math.PI; });
+}
+function kartPose() { const t = KPOS.clone().add(new V3(0, 1, 0)), p = KPOS.clone().add(new V3(10, isMobile() ? 30 : 20, isMobile() ? 34 : 24)); shiftForPanel(t, p); return { target: t, pos: p }; }
+const kartStats = () => store("kart") || { races: 0, wins: 0, podium: 0, best: null };
+const puzzlePieces = () => store("puzzle") || {};
+const fmtRace = s => s == null ? "—" : Math.floor(s / 60) + ":" + (s % 60).toFixed(2).padStart(5, "0");
+function panelKart(quiet) {
+  const st = kartStats(), pc = puzzlePieces();
+  openPanel('<div class="p-top"><span class="crumb">嘉蘭樂學島．衛星島</span><button class="p-close" aria-label="關閉">×</button></div>' +
+    '<h2 style="--c:#D3322B"><i class="dot"></i>🏎 飆速卡丁車島</h2><p class="p-lede">從一年級島走「彩虹賽道橋」就能到。和三位電腦對手比賽 3 圈，跑進前三名，就能拿到一片<b>神秘拼圖碎片</b>！</p>' +
+    '<button class="btn kart-go" id="kartPlay">🏁 開始比賽</button>' +
+    '<h3>🏆 我的戰績</h3><dl class="kv"><dt>最佳時間</dt><dd>' + fmtRace(st.best) + '</dd><dt>比賽次數</dt><dd>' + st.races + ' 場</dd><dt>冠軍</dt><dd>' + st.wins + ' 次</dd><dt>前三名</dt><dd>' + st.podium + ' 次</dd><dt>拼圖碎片</dt><dd>' + (pc.kart ? "🧩 已取得卡丁車碎片" : "還沒取得") + '</dd></dl>' +
+    '<h3>🎮 怎麼玩</h3><ul class="goal-list"><li>車子會自動往前開，用 ◀ ▶（鍵盤方向鍵）轉彎。「🤖輔助駕駛」開著時，不按方向鍵車子也會沿著賽道轉，熟練後可以關掉，自己開更快！</li><li>轉彎時按住「💨甩尾」（空白鍵），放開會噴火加速。</li><li>撞到「?」寶箱可以拿道具，按「🎁道具」（Z 鍵）使用：🌾小米能量會加速、🪨小石頭會丟在車後。</li><li>開到草地上會變慢喔！</li></ul>', "subject");
+  $("#kartPlay").addEventListener("click", () => startKartGame());
+  if (!quiet) speak("飆速卡丁車島！");
+}
+
+/* ---------- 遊戲本體（2D 俯視、鏡頭跟著車子轉） ---------- */
+const KG = { on: false };
+const KART_PTS = [[0, 0], [600, -40], [1000, 60], [1180, 320], [1050, 560], [760, 560], [620, 760], [760, 980], [1100, 1040], [1220, 1300], [900, 1460], [400, 1420], [160, 1200], [260, 900], [80, 700], [-200, 640], [-360, 380], [-260, 120]];
+const KW = 170, KLAPS = 3;
+function buildKartTrack() {
+  if (KG.T) return KG.T;
+  const P = KART_PTS, n = P.length, pts = [];
+  for (let i = 0; i < n; i++) {
+    const p0 = P[(i - 1 + n) % n], p1 = P[i], p2 = P[(i + 1) % n], p3 = P[(i + 2) % n];
+    for (let k = 0; k < 34; k++) {
+      const t = k / 34, t2 = t * t, t3 = t2 * t, f = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+      pts.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  const N = pts.length, tan = pts.map((p, i) => { const q = pts[(i + 1) % N], r = pts[(i - 1 + N) % N], dx = q[0] - r[0], dy = q[1] - r[1], l = Math.hypot(dx, dy); return [dx / l, dy / l]; });
+  const path = new Path2D(); pts.forEach((p, i) => i ? path.lineTo(p[0], p[1]) : path.moveTo(p[0], p[1])); path.closePath();
+  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9; pts.forEach(p => { minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); });
+  // 場邊景物：樹、圖騰、看臺
+  const deco = [], rnd = mulberry(7);
+  const near = (x, y) => { let m = 1e9; for (let i = 0; i < N; i += 3) m = Math.min(m, Math.hypot(pts[i][0] - x, pts[i][1] - y)); return m; };
+  for (let k = 0; k < 260; k++) { const x = minX - 300 + rnd() * (maxX - minX + 600), y = minY - 300 + rnd() * (maxY - minY + 600), d = near(x, y); if (d > KW / 2 + 70) deco.push({ x, y, r: 18 + rnd() * 26, t: rnd() < 0.08 ? "totem" : rnd() < 0.1 ? "flower" : "tree", c: ["#3F7A47", "#4E9F50", "#2E6B3A", "#5C8F3A"][Math.floor(rnd() * 4)] }); }
+  const boxes = []; [0.18, 0.45, 0.72].forEach(f => { const i = Math.floor(N * f), p = pts[i], t = tan[i]; [-0.3, -0.1, 0.1, 0.3].forEach(o => boxes.push({ x: p[0] - t[1] * o * KW, y: p[1] + t[0] * o * KW, i, cd: 0 })); });
+  KG.T = { pts, tan, N, path, deco, boxes, box: [minX, minY, maxX, maxY] };
+  return KG.T;
+}
+function nearestIdx(T, x, y, from) {
+  let best = from, bd = 1e18;
+  for (let k = -40; k <= 40; k++) { const i = (from + k + T.N) % T.N, p = T.pts[i], d = (p[0] - x) ** 2 + (p[1] - y) ** 2; if (d < bd) { bd = d; best = i; } }
+  return { i: best, d: Math.sqrt(bd) };
+}
+function startKartGame() {
+  const T = buildKartTrack();
+  stopTour(); closeModal(); KG.on = true; if (KG.assist === undefined) KG.assist = true;
+  if (music.started) musicDuck(true);
+  const host = document.createElement("div"); host.className = "kart-game"; host.id = "kartGame";
+  host.innerHTML = '<canvas id="kartCv"></canvas><div class="kg-hud"><div class="kg-box"><small>名次</small><b id="kgPos">1/4</b></div><div class="kg-box"><small>圈數</small><b id="kgLap">1/3</b></div><div class="kg-box"><small>時間</small><b id="kgTime">0:00.00</b></div><div class="kg-box kg-item"><small>道具</small><b id="kgItem">－</b></div></div>' +
+    '<button class="kg-exit" id="kgExit" aria-label="離開比賽">✕ 離開</button><button class="kg-exit kg-assist" id="kgAssist" aria-pressed="true">🤖 輔助駕駛：開</button><div class="kg-msg" id="kgMsg"></div>' +
+    '<div class="kg-pad left"><button data-k="left" aria-label="左轉">◀</button><button data-k="right" aria-label="右轉">▶</button></div>' +
+    '<div class="kg-pad right"><button data-k="item" aria-label="使用道具">🎁<small>道具</small></button><button data-k="drift" aria-label="甩尾">💨<small>甩尾</small></button><button data-k="brake" aria-label="煞車">🛑<small>煞車</small></button></div>' +
+    '<div class="kg-result" id="kgResult" hidden></div>';
+  document.body.appendChild(host);
+  const cv = $("#kartCv"), x = cv.getContext("2d");
+  const fit = () => { const d = Math.min(2, devicePixelRatio || 1); cv.width = innerWidth * d; cv.height = innerHeight * d; KG.dpr = d; };
+  fit(); addEventListener("resize", fit); KG.fit = fit;
+  const K = KG.keys = {};
+  KG.kd = e => { const m = { ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right", ArrowDown: "brake", s: "brake", S: "brake", " ": "drift", Shift: "drift", z: "item", Z: "item", Enter: "item" }[e.key]; if (m) { K[m] = e.type === "keydown"; e.preventDefault(); } if (e.key === "Escape" && e.type === "keydown") exitKart(); };
+  addEventListener("keydown", KG.kd); addEventListener("keyup", KG.kd);
+  $all(".kg-pad button", host).forEach(b => { const k = b.getAttribute("data-k"); const on = e => { e.preventDefault(); K[k] = true; }, off = e => { e.preventDefault(); K[k] = false; }; b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off); b.addEventListener("pointerleave", off); b.addEventListener("pointercancel", off); });
+  $("#kgExit").addEventListener("click", exitKart);
+  const ab = $("#kgAssist"), setA = () => { ab.textContent = "🤖 輔助駕駛：" + (KG.assist ? "開" : "關"); ab.setAttribute("aria-pressed", String(KG.assist)); }; setA();
+  ab.addEventListener("click", () => { KG.assist = !KG.assist; setA(); ab.blur(); });
+  // 參賽車手
+  const st0 = T.N - 10, mk = (name, col, ai, slot) => {
+    const i = (st0 - Math.floor(slot / 2) * 14 + T.N) % T.N, p = T.pts[i], t = T.tan[i], o = slot % 2 ? 0.22 : -0.22;
+    return { name, col, ai, x: p[0] - t[1] * o * KW, y: p[1] + t[0] * o * KW, a: Math.atan2(t[1], t[0]), v: 0, idx: i, lap: 0, half: true, done: false, time: 0, item: null, boost: 0, spin: 0, drift: 0, skill: ai ? 0.86 + Math.random() * 0.1 : 1, useAt: 0 };
+  };
+  KG.cars = [mk("你", "#2F67C4", false, 3), mk("熊鷹號", "#E2573B", true, 0), mk("飛魚號", "#2BB3C0", true, 1), mk("雲豹號", "#F2A33A", true, 2)];
+  KG.me = KG.cars[0]; KG.rocks = []; KG.fx = []; KG.t = -3.5; KG.count = 4; KG.fin = []; KG.over = false; KG.last = performance.now();
+  T.boxes.forEach(b => { b.cd = 0; });
+  kartEngine(true);
+  KG.raf = requestAnimationFrame(kartLoop);
+}
+function kartBeep(f, d = 0.15, v = 0.15) { const ctx = sfxAudio(); if (!ctx) return; const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain(); o.type = "square"; o.frequency.value = f; g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + d + 0.02); }
+function kartEngine(on) {
+  const ctx = sfxAudio(); if (!ctx) return;
+  if (on && !KG.eng) { const o = ctx.createOscillator(), lp = ctx.createBiquadFilter(), g = ctx.createGain(); o.type = "sawtooth"; o.frequency.value = 60; lp.type = "lowpass"; lp.frequency.value = 500; g.gain.value = 0.035; o.connect(lp); lp.connect(g); g.connect(ctx.destination); o.start(); KG.eng = { o, g }; }
+  if (!on && KG.eng) { try { KG.eng.o.stop(); } catch (e) {} KG.eng = null; }
+}
+function exitKart() {
+  if (!KG.on) return; KG.on = false; cancelAnimationFrame(KG.raf); kartEngine(false);
+  removeEventListener("keydown", KG.kd); removeEventListener("keyup", KG.kd); removeEventListener("resize", KG.fit);
+  const h = $("#kartGame"); if (h) h.remove();
+  if (music.started) musicDuck(false);
+  if (focus.g === 10) panelKart(true);
+}
+function kartMsg(t, ms = 1200) { const m = $("#kgMsg"); if (!m) return; m.textContent = t; m.classList.add("show"); clearTimeout(KG.msgT); KG.msgT = setTimeout(() => m.classList.remove("show"), ms); }
+function kartLoop(now) {
+  if (!KG.on) return;
+  const dt = Math.min(0.033, (now - KG.last) / 1000); KG.last = now;
+  stepKart(dt); drawKart();
+  KG.raf = requestAnimationFrame(kartLoop);
+}
+const angWrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+function stepKart(dt) {
+  const T = KG.T, K = KG.keys;
+  KG.t += dt;
+  if (KG.t < 0) { const c = Math.ceil(-KG.t); if (c !== KG.count && c <= 3) { KG.count = c; kartMsg(String(c), 700); kartBeep(440); } return; }
+  if (KG.count > 0) { KG.count = 0; kartMsg("出發！", 900); kartBeep(880, 0.4); }
+  const cars = KG.cars;
+  cars.forEach(c => {
+    if (c.done && !c.ai && !KG.over) return;
+    const ni = nearestIdx(T, c.x, c.y, c.idx), off = ni.d > KW / 2;
+    // 圈數判定
+    if (c.idx > T.N * 0.85 && ni.i < T.N * 0.15 && c.half) { c.lap++; c.half = false; if (!c.ai && c.lap > 1 && c.lap <= KLAPS) { kartMsg(c.lap === KLAPS ? "最後一圈！" : "第 " + c.lap + " 圈", 1200); kartBeep(660, 0.2); } }
+    if (ni.i > T.N * 0.4 && ni.i < T.N * 0.6) c.half = true;
+    c.idx = ni.i;
+    if (c.lap > KLAPS && !c.done) { c.done = true; c.time = KG.t; KG.fin.push(c); if (c === KG.me) kartFinish(); }
+    let steer = 0, gas = 1, brake = 0, drift = false;
+    if (c.ai || c.done) {
+      const look = 10 + Math.floor(c.v / 40), j = (c.idx + look) % T.N, p = T.pts[j], want = Math.atan2(p[1] - c.y, p[0] - c.x);
+      const d = angWrap(want - c.a); steer = clamp(d * 3, -1, 1);
+      const t1 = T.tan[c.idx], t2 = T.tan[(c.idx + 30) % T.N], curv = Math.abs(angWrap(Math.atan2(t2[1], t2[0]) - Math.atan2(t1[1], t1[0])));
+      const rank = cars.filter(o => o !== c && prog(o) > prog(c)).length, rb = c.ai ? (prog(KG.me) > prog(c) ? 1.06 : 0.97) : 1;
+      c.cap = 470 * c.skill * rb * (1 - Math.min(0.35, curv * 0.32)) * (c.done ? 0.5 : 1);
+      if (c.item && KG.t > c.useAt) kartUseItem(c);
+    } else {
+      steer = (K.left ? -1 : 0) + (K.right ? 1 : 0); brake = K.brake ? 1 : 0; drift = !!K.drift;
+      if (!steer && KG.assist) { const j = (c.idx + 12 + Math.floor(c.v / 40)) % T.N, p = T.pts[j]; steer = clamp(angWrap(Math.atan2(p[1] - c.y, p[0] - c.x) - c.a) * 2, -0.7, 0.7); }   // 輔助駕駛：沒按方向鍵時，車子會自己沿著賽道轉
+      if (K.item && !KG.itemHeld) { KG.itemHeld = true; kartUseItem(c); } if (!K.item) KG.itemHeld = false;
+      c.cap = 480;
+    }
+    let cap = c.cap * (off ? 0.45 : 1); if (c.boost > 0) { cap *= 1.45; c.boost -= dt; }
+    if (c.spin > 0) { c.spin -= dt; c.a += 11 * dt; c.v *= 0.94; }
+    else {
+      const turn = 2.5 * steer * clamp(c.v / 200, 0.25, 1) * (drift && steer ? 1.5 : 1);
+      c.a += turn * dt;
+      if (!c.ai) { if (drift && steer && c.v > 220) { c.drift += dt; if (Math.random() < 0.6) KG.fx.push({ x: c.x - Math.cos(c.a) * 18, y: c.y - Math.sin(c.a) * 18, vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 60, l: 0.35, c: c.drift > 0.7 ? "#FFB347" : "#9AD0FF" }); }
+        else { if (c.drift > 0.7) { c.boost = Math.max(c.boost, Math.min(1.6, c.drift * 0.9)); kartMsg("甩尾加速！", 700); kartBeep(990, 0.12); } c.drift = 0; } }
+      c.v += (gas * (c.v < cap ? 420 : -260) - brake * 700) * dt; c.v = clamp(c.v, 0, cap * 1.02 + (c.v > cap ? 0 : 0));
+      if (c.v > cap) c.v -= (c.v - cap) * Math.min(1, dt * 3);
+    }
+    c.x += Math.cos(c.a) * c.v * dt; c.y += Math.sin(c.a) * c.v * dt;
+    // 賽道外牆：太遠就推回
+    const ni2 = nearestIdx(T, c.x, c.y, c.idx), lim = KW / 2 + 110;
+    if (ni2.d > lim) { const p = T.pts[ni2.i], k = lim / ni2.d; c.x = p[0] + (c.x - p[0]) * k; c.y = p[1] + (c.y - p[1]) * k; c.v *= 0.92; const tn = T.tan[ni2.i]; c.a += angWrap(Math.atan2(tn[1], tn[0]) - c.a) * 0.08; }
+    if (c.boost > 0) KG.fx.push({ x: c.x - Math.cos(c.a) * 22, y: c.y - Math.sin(c.a) * 22, vx: -Math.cos(c.a) * 120, vy: -Math.sin(c.a) * 120, l: 0.25, c: "#FF7A3D" });
+    // 道具寶箱
+    T.boxes.forEach(b => { if (b.cd > 0) return; if (Math.hypot(b.x - c.x, b.y - c.y) < 34 && !c.item) { b.cd = 4; c.item = Math.random() < 0.65 ? "boost" : "rock"; c.useAt = KG.t + 1 + Math.random() * 3; if (!c.ai) { kartBeep(1200, 0.08); kartMsg(c.item === "boost" ? "拿到 🌾小米能量！" : "拿到 🪨小石頭！", 900); } } });
+    // 石頭
+    KG.rocks = KG.rocks.filter(r => { if (r.owner === c && KG.t - r.t < 0.6) return true; if (Math.hypot(r.x - c.x, r.y - c.y) < 26 && c.spin <= 0) { c.spin = 0.9; if (!c.ai) { kartMsg("哎呀，打滑了！", 900); kartBeep(180, 0.3); } return false; } return true; });
+  });
+  T.boxes.forEach(b => { if (b.cd > 0) b.cd -= dt; });
+  // 車子互相碰撞
+  for (let i = 0; i < cars.length; i++) for (let j = i + 1; j < cars.length; j++) { const a = cars[i], b = cars[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy); if (d < 40 && d > 0.01) { const k = (40 - d) / 2 / d; a.x -= dx * k; a.y -= dy * k; b.x += dx * k; b.y += dy * k; } }
+  KG.fx = KG.fx.filter(f => { f.l -= dt; f.x += f.vx * dt; f.y += f.vy * dt; return f.l > 0; });
+  if (KG.eng) { const v = KG.me.v; KG.eng.o.frequency.value = 55 + v * 0.28 + (KG.me.boost > 0 ? 40 : 0); }
+  // HUD
+  if (!KG.over) {
+    const order = cars.slice().sort((a, b) => (a.done && b.done) ? a.time - b.time : b.done - a.done || prog(b) - prog(a)), pos = order.indexOf(KG.me) + 1;
+    $("#kgPos").textContent = pos + "/4"; $("#kgLap").textContent = Math.min(KLAPS, Math.max(1, KG.me.lap)) + "/" + KLAPS; $("#kgTime").textContent = fmtRace(Math.max(0, KG.t));
+    $("#kgItem").textContent = KG.me.item === "boost" ? "🌾" : KG.me.item === "rock" ? "🪨" : "－";
+  }
+}
+const prog = c => c.lap * KG.T.N + c.idx;
+function kartUseItem(c) {
+  if (!c.item) return;
+  if (c.item === "boost") { c.boost = 1.5; if (!c.ai) kartBeep(700, 0.25); }
+  else KG.rocks.push({ x: c.x - Math.cos(c.a) * 36, y: c.y - Math.sin(c.a) * 36, owner: c, t: KG.t });
+  c.item = null;
+}
+function kartFinish() {
+  // 玩家到終點後，等電腦對手全部完成（最多 8 秒）
+  kartMsg("抵達終點！", 1500); kartBeep(1046, 0.5);
+  setTimeout(() => {
+    if (!KG.on) return; KG.over = true;
+    const cars = KG.cars, rest = cars.filter(c => !c.done).sort((a, b) => prog(b) - prog(a));
+    const order = KG.fin.concat(rest), rank = order.indexOf(KG.me) + 1, myTime = KG.me.time;
+    const st = kartStats(); st.races++; if (rank === 1) st.wins++; if (rank <= 3) st.podium++; const newBest = st.best == null || myTime < st.best; if (newBest) st.best = myTime; store("kart", st);
+    let reward = "";
+    if (rank <= 3) { const pc = puzzlePieces(); const first = !pc.kart; if (first) { pc.kart = { rank, date: todayKey() }; store("puzzle", pc); } reward = first ? '<div class="kg-reward">🧩 獲得一片<b>神秘拼圖碎片</b>！<small>收進背包了。解謎關卡開放後，就能用它拼出秘密。</small></div>' : '<div class="kg-reward">🧩 你已經擁有卡丁車拼圖碎片了！</div>'; playCheer(); confetti(); }
+    else reward = '<div class="kg-reward no">跑進前三名，就能拿到神秘拼圖碎片，再挑戰一次吧！</div>';
+    const r = $("#kgResult"); r.hidden = false;
+    r.innerHTML = '<h2>' + (rank === 1 ? "🏆 冠軍！" : rank <= 3 ? "🎉 第 " + rank + " 名！" : "第 " + rank + " 名，繼續加油！") + '</h2>' +
+      '<ol class="kg-rank">' + order.map((c, i) => '<li class="' + (c === KG.me ? "me" : "") + '"><i style="background:' + c.col + '"></i><b>' + esc(c.name) + '</b><span>' + (c.done ? fmtRace(c.time) : "未完成") + '</span></li>').join("") + '</ol>' +
+      '<p class="kg-best">你的時間 ' + fmtRace(myTime) + (newBest ? '　<b>新紀錄！</b>' : '　最佳 ' + fmtRace(st.best)) + '</p>' + reward +
+      '<div class="row" style="justify-content:center"><button class="btn" id="kgAgain">再比一次</button><button class="btn ghost" id="kgBack">回到島上</button></div>';
+    $("#kgAgain").addEventListener("click", () => { exitKart(); startKartGame(); }); $("#kgBack").addEventListener("click", exitKart);
+    speak(rank === 1 ? "冠軍！太厲害了！" : "第" + rank + "名！"); updateCertCount();
+  }, 2500);
+}
+function drawKart() {
+  const cv = $("#kartCv"); if (!cv) return;
+  const x = cv.getContext("2d"), W = cv.width / KG.dpr, H = cv.height / KG.dpr, T = KG.T, me = KG.me;
+  x.setTransform(KG.dpr, 0, 0, KG.dpr, 0, 0);
+  x.fillStyle = "#6DB052"; x.fillRect(0, 0, W, H);
+  const zoom = Math.min(W, H) / 820 * (1 - Math.min(0.18, me.v / 3000));
+  x.save(); x.translate(W / 2, H * 0.66); x.scale(zoom, zoom); x.rotate(-me.a - Math.PI / 2); x.translate(-me.x, -me.y);
+  // 草地紋路
+  x.fillStyle = "#64A64B"; for (let i = -6; i < 30; i++) x.fillRect(T.box[0] - 400 + i * 120, T.box[1] - 400, 60, T.box[3] - T.box[1] + 800);
+  // 賽道
+  x.lineJoin = "round"; x.lineCap = "round";
+  x.strokeStyle = "#E9DFC7"; x.lineWidth = KW + 60; x.stroke(T.path);
+  x.setLineDash([26, 26]); x.strokeStyle = "#D3322B"; x.lineWidth = KW + 22; x.stroke(T.path);
+  x.setLineDash([]); x.strokeStyle = "#FFFFFF"; x.lineWidth = KW + 22; x.globalCompositeOperation = "destination-over"; x.stroke(T.path); x.globalCompositeOperation = "source-over";
+  x.strokeStyle = "#4A4E55"; x.lineWidth = KW; x.stroke(T.path);
+  x.setLineDash([30, 30]); x.strokeStyle = "rgba(255,255,255,.55)"; x.lineWidth = 5; x.stroke(T.path); x.setLineDash([]);
+  // 起跑線（黑白格）
+  { const p = T.pts[0], t = T.tan[0]; x.save(); x.translate(p[0], p[1]); x.rotate(Math.atan2(t[1], t[0])); for (let i = 0; i < 2; i++) for (let j = 0; j < 10; j++) { x.fillStyle = (i + j) % 2 ? "#111" : "#FFF"; x.fillRect(-14 + i * 14, -KW / 2 + j * KW / 10, 14, KW / 10); } x.restore(); }
+  // 景物
+  T.deco.forEach(d => {
+    if (Math.abs(d.x - me.x) > 1400 || Math.abs(d.y - me.y) > 1400) return;
+    if (d.t === "tree") { x.fillStyle = "rgba(0,0,0,.18)"; x.beginPath(); x.arc(d.x + 8, d.y + 8, d.r, 0, 7); x.fill(); x.fillStyle = d.c; x.beginPath(); x.arc(d.x, d.y, d.r, 0, 7); x.fill(); x.fillStyle = "rgba(255,255,255,.12)"; x.beginPath(); x.arc(d.x - d.r * 0.3, d.y - d.r * 0.3, d.r * 0.45, 0, 7); x.fill(); }
+    else if (d.t === "flower") { ["#F2C14E", "#F2A9BE", "#FFFFFF"].forEach((c, i) => { x.fillStyle = c; x.beginPath(); x.arc(d.x + i * 10, d.y + (i % 2) * 8, 6, 0, 7); x.fill(); }); }
+    else { x.fillStyle = "#232323"; x.fillRect(d.x - 12, d.y - 12, 24, 24); x.fillStyle = "#B5322A"; x.fillRect(d.x - 8, d.y - 8, 16, 16); x.fillStyle = "#E8B33A"; x.beginPath(); x.moveTo(d.x, d.y - 6); x.lineTo(d.x + 6, d.y); x.lineTo(d.x, d.y + 6); x.lineTo(d.x - 6, d.y); x.fill(); }
+  });
+  // 道具寶箱
+  const tt = performance.now() / 1000;
+  T.boxes.forEach(b => { if (b.cd > 0) return; x.save(); x.translate(b.x, b.y); x.rotate(tt * 2); const g = x.createLinearGradient(-16, -16, 16, 16); g.addColorStop(0, "#FFE680"); g.addColorStop(1, "#FF8FC8"); x.fillStyle = g; x.fillRect(-16, -16, 32, 32); x.strokeStyle = "#fff"; x.lineWidth = 3; x.strokeRect(-16, -16, 32, 32); x.rotate(-tt * 2 + me.a + Math.PI / 2); x.fillStyle = "#fff"; x.font = "bold 22px sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("?", 0, 1); x.restore(); });
+  KG.rocks.forEach(r => { x.fillStyle = "#7A7A72"; x.beginPath(); x.arc(r.x, r.y, 13, 0, 7); x.fill(); x.fillStyle = "#9A9A90"; x.beginPath(); x.arc(r.x - 4, r.y - 4, 6, 0, 7); x.fill(); });
+  KG.fx.forEach(f => { x.globalAlpha = Math.max(0, f.l * 3); x.fillStyle = f.c; x.beginPath(); x.arc(f.x, f.y, 6, 0, 7); x.fill(); }); x.globalAlpha = 1;
+  // 車子
+  KG.cars.forEach(c => {
+    x.save(); x.translate(c.x, c.y); x.rotate(c.a);
+    x.fillStyle = "rgba(0,0,0,.25)"; x.fillRect(-20, -13, 44, 30);
+    x.fillStyle = "#1E1E1E"; [[-14, -16], [10, -16], [-14, 10], [10, 10]].forEach(([a, b]) => x.fillRect(a, b, 10, 6));
+    x.fillStyle = c.col; x.beginPath(); x.moveTo(24, 0); x.lineTo(14, -11); x.lineTo(-20, -11); x.lineTo(-20, 11); x.lineTo(14, 11); x.closePath(); x.fill();
+    x.fillStyle = "#fff"; x.fillRect(-6, -11, 6, 22);
+    x.fillStyle = "#F4F0E6"; x.beginPath(); x.arc(-4, 0, 7, 0, 7); x.fill(); x.fillStyle = c.col; x.beginPath(); x.arc(-5, 0, 7, Math.PI * 0.5, Math.PI * 1.5); x.fill();
+    x.restore();
+    if (c !== me) { x.save(); x.translate(c.x, c.y); x.rotate(me.a + Math.PI / 2); x.font = "bold 16px 'Noto Sans TC', sans-serif"; x.textAlign = "center"; x.fillStyle = "rgba(0,0,0,.55)"; x.fillText(c.name, 1, -27); x.fillStyle = "#fff"; x.fillText(c.name, 0, -28); x.restore(); }
+  });
+  x.restore();
+  // 小地圖
+  const mw = Math.min(170, W * 0.3), mh = mw * 0.8, mx = W - mw - 14, my = 70, bw = T.box[2] - T.box[0], bh = T.box[3] - T.box[1], s = Math.min((mw - 16) / bw, (mh - 16) / bh);
+  x.fillStyle = "rgba(20,30,40,.55)"; x.beginPath(); x.roundRect ? x.roundRect(mx, my, mw, mh, 12) : x.rect(mx, my, mw, mh); x.fill();
+  x.save(); x.translate(mx + 8 - T.box[0] * s + (mw - 16 - bw * s) / 2, my + 8 - T.box[1] * s + (mh - 16 - bh * s) / 2); x.scale(s, s);
+  x.strokeStyle = "rgba(255,255,255,.85)"; x.lineWidth = 34; x.stroke(T.path);
+  KG.cars.forEach(c => { x.fillStyle = c.col; x.beginPath(); x.arc(c.x, c.y, c === me ? 60 : 44, 0, 7); x.fill(); if (c === me) { x.strokeStyle = "#fff"; x.lineWidth = 16; x.stroke(); } });
+  x.restore();
+  // 速度表
+  const sp = Math.round(me.v / 5); x.fillStyle = "rgba(20,30,40,.55)"; x.fillRect(W / 2 - 60, H - 46, 120, 34); x.fillStyle = "#fff"; x.font = "bold 18px 'Noto Sans TC', sans-serif"; x.textAlign = "center"; x.fillText(sp + " km/h", W / 2, H - 23);
+  if (me.drift > 0) { x.fillStyle = me.drift > 0.7 ? "#FFB347" : "#9AD0FF"; x.fillRect(W / 2 - 60, H - 52, 120 * Math.min(1, me.drift / 1.8), 5); }
+}
+
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -4562,6 +4870,7 @@ function refreshOpenState() {
     else if (focus.g === 7) panelTools(true);
     else if (focus.g === 8) panelTrain(true);
     else if (focus.g === 9) panelPark(true);
+    else if (focus.g === 10) panelKart(true);
     else if (focus.g) panelIsland(focus.g);
     else if (focus.g === null) panelHome();
   }
@@ -4683,7 +4992,8 @@ function route() {
   if (h === "fireworks") { openFireworks(); return; }
   if (h === "card") { openDailyCard(false); return; }
   if (h === "cards") { openCardBook(); return; }
-  if (h === "park") { if (panelMin()) setPanelMin(false, false); focus.g = 9; focus.key = null; panelPark(); fly("park", parkPose); }
+  if (h === "kart") { if (panelMin()) setPanelMin(false, false); focus.g = 10; focus.key = null; panelKart(); fly("kart", kartPose); }
+  else if (h === "park") { if (panelMin()) setPanelMin(false, false); focus.g = 9; focus.key = null; panelPark(); fly("park", parkPose); }
   else
   if (h === "train") { if (panelMin()) setPanelMin(false, false); focus.g = 8; focus.key = null; panelTrain(); fly("train", trainViewPose); }
   else if (h === "tools") { if (panelMin()) setPanelMin(false, false); focus.g = 7; focus.key = null; panelTools(); fly("tools", harborPose); }
