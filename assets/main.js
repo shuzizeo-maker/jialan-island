@@ -1918,6 +1918,7 @@ function addLabel(obj, offY, kind, data, onClick) {
   const L = { el, obj, offY, kind, data, mode: null }; labels.push(L); return L;
 }
 function labelMode(L) {
+  if (L.kind === "npc" && L.data.type === "gachaLbl") return focus.g === 0 && !FEST.npc ? "fixed" : "hide";
   if (L.kind === "npc") return (L.data.type === "host" ? focus.g === 0 : (focus.g === L.data.g && !FEST.npc)) ? "fixed" : "hide";
   if (L.kind === "fest") return (focus.g === 0 || focus.g === null) ? "fixed" : "hide";
   if (L.kind === "park") return focus.g === 9 && !PARK.ride && !PARK.boarded ? "fixed" : "hide";
@@ -1943,6 +1944,8 @@ function renderLabel(L, mode) {
     const g = GRADES[d.g - 1], cnt = SUBJECTS.filter(s => isOpen(g.n, s.key)).length;
     L.el.style.setProperty("--g", g.color);
     L.el.innerHTML = '<i></i><span>' + g.name + '</span>' + (cnt ? "<small>" + cnt + "</small>" : "");
+  } else if (L.kind === "npc" && d.type === "gachaLbl") {
+    L.el.className = "lbl npc station"; L.el.style.setProperty("--s", "#D3322B"); L.el.innerHTML = '<i>🥚</i><span>校寵扭蛋機</span>';
   } else if (L.kind === "npc") {
     const host = d.type === "host", s = host ? null : subjectOf(d.key);
     L.el.className = "lbl npc" + (host ? " host" : "") + (mode === "hide" ? " hide" : "");
@@ -1970,7 +1973,8 @@ function renderLabel(L, mode) {
     L.el.setAttribute("aria-label", f.title + "，點我看活動");
     L.el.innerHTML = '<i>' + f.icon + '</i><span>' + esc(f.title) + '</span>';
   } else if (L.kind === "lock") {
-    L.el.innerHTML = '<span class="lk">' + ICON_LOCK + '</span>' + d.name + '<small>尚未開放</small>';
+    const open = d.name === "大武山" && questComplete();
+    L.el.innerHTML = open ? '⛰ 大武山<small>已解鎖</small>' : '<span class="lk">' + ICON_LOCK + '</span>' + d.name + '<small>' + (d.name === "大武山" ? "拼圖 " + questDone().length + "/9" : "尚未開放") + '</small>';
   } else L.el.innerHTML = d.name;
 }
 const _v = new V3();
@@ -2000,6 +2004,7 @@ function makeLabels() {
 }
 function refreshLabels() { labels.forEach(L => { L.mode = null; }); }
 function lockMsg(w) {
+  if (w === "mountain") { if (questComplete()) openMountain(); else go("puzzle"); return; }
   toast(ICON_LOCK.replace("<svg", '<svg width="22" height="22"') + (w === "mountain" ? "大武山尚未開放探險，敬請期待！" : "太平洋尚未開放探險，敬請期待！"), true);
 }
 
@@ -2026,6 +2031,7 @@ function onPick(u) {
   if (u.type === "ride") return openRide(u.key);
   if (u.type === "park" || u.type === "ferry") return go("park");
   if (u.type === "kart") return go("kart");
+  if (u.type === "gacha") return go("gacha");
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2067,7 +2073,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2590,7 +2596,9 @@ function saveCert(pk, L, score, total, stars) {
 function bagItems() {
   return [["🎓", "我的證書", Object.keys(store("certs") || {}).length + " 張", () => go("certs")],
     ["🎆", "放煙火", fwTokens() + " 次", () => openFireworks()],
-    ["🧩", "拼圖碎片", Object.keys(puzzlePieces()).length + " 片", () => go("kart")],
+    ["⛰", "大武山拼圖", questDone().length + " / 9 片", () => go("puzzle")],
+    ["🥚", "校寵扭蛋", capsules() + " 顆", () => go("gacha")],
+    ["👜", "校寵蒐集袋", Object.keys(petBag().owned).length + " 種", () => go("pets")],
     ["🎟", "樂園門票", (typeof parkTickets === "function" ? parkTickets() : 0) + " 張", () => go("park")],
     ["🃏", "今日魔法卡", "卡冊 " + cardBook().length + " 張", () => openDailyCard(false)],
     ["📰", "今日島報", "", () => openPaper(false)]];
@@ -2601,7 +2609,7 @@ function toggleBag(force) {
   p.innerHTML = '<b class="bag-title">🎒 我的背包</b>' + bagItems().map((it, i) => '<button class="bag-item" data-bag="' + i + '" role="menuitem"><span>' + it[0] + '</span><b>' + it[1] + '</b><small>' + it[2] + '</small></button>').join("");
   $all("[data-bag]", p).forEach(b => b.addEventListener("click", () => { toggleBag(false); bagItems()[+b.getAttribute("data-bag")][3](); }));
 }
-function updateCertCount() { const el = $("#bagN"); if (el) { const n = fwTokens() + parkTickets(); el.textContent = n; el.hidden = !n; } }
+function updateCertCount() { const el = $("#bagN"); if (el) { const n = fwTokens() + parkTickets() + capsules(); el.textContent = n; el.hidden = !n; } }
 
 // Canvas 證書：A4 橫式，1754×1240（150 dpi）
 let certLogo = null;
@@ -3096,6 +3104,8 @@ const HOST_FAQ = [
   { q: "今晚有流星雨嗎？", k: ["流星", "星星", "天文", "許願"], a: "", act: ["", "meteor"] },
   { q: "小火車怎麼搭？", k: ["火車", "小火車", "搭車", "車站", "坐車"], a: "環島小火車每天 06:00 到 22:00 繞著群島跑，停靠 8 個車站。點畫面上的「🚃 環島小火車」可以看即時動態，還能直接上車搭一圈！", act: ["看小火車即時動態", "train"] },
   { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。打開左下角的 🎒 背包，點「放煙火」，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
+  { q: "大武山怎麼解鎖？", k: ["大武山", "拼圖", "解謎", "碎片", "秘密"], a: "大武山的入口被分成九片拼圖，藏在樂學島各個地方：卡丁車、藍鵲、證書、節慶、流星、小火車、樂園、魔法卡和校寵。集滿九片，大武山就會打開！", act: ["看拼圖進度", "puzzle"] },
+  { q: "校寵怎麼拿？", k: ["校寵", "扭蛋", "寵物", "蒐集", "盲盒", "雲豹"], a: "嘉蘭國小校門內有一台校寵扭蛋機！每天第一次上島送 1 顆扭蛋，拿到證書、找到拼圖也會送。打開扭蛋就會隨機得到一隻可愛的校寵，收在蒐集袋裡。", act: ["去轉扭蛋", "gacha"] },
   { q: "卡丁車怎麼玩？", k: ["卡丁車", "賽車", "比賽", "拼圖", "碎片", "開車"], a: "飆速卡丁車島在一年級島旁邊，走彩虹賽道橋就能到。和三位電腦對手比 3 圈，用 ◀ ▶ 轉彎、甩尾可以加速，跑進前三名就能拿到神秘拼圖碎片！", act: ["去卡丁車島", "kart"] },
   { q: "樂園怎麼去？", k: ["樂園", "遊樂園", "摩天輪", "雲霄飛車", "渡輪", "船", "門票", "玩"], a: "琉璃珠夢幻樂園在海上的衛星島。到工具港的碼頭搭渡輪，每 6 分鐘一班（08:00–20:00），上船要驗票。第 1 張學習證書送 1 張體驗券，之後每 2 張證書再換 1 張門票！", act: ["看船期與門票", "park"] },
   { q: "魔法卡是什麼？", k: ["魔法卡", "卡牌", "卡片", "抽卡", "心情", "卡冊"], a: "每天第一次上島可以抽一張魔法卡，上面有今天的心情、一句鼓勵的話和一個小任務。可以下載成圖片，也可以收進卡冊，打開左下角的 🎒 背包就能看。", act: ["看今天的魔法卡", "card"] },
@@ -3601,6 +3611,7 @@ function stepMeteors(dt) {
       let sx = Math.random() * W, sy = Math.random() * (lim - 30) * 0.8 + 10, dx, dy;
       if (radiant) { dx = sx - radiant[0]; dy = sy - radiant[1]; } else { dx = Math.random() - 0.5; dy = 0.3 + Math.random() * 0.5; }
       const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+      MET.seen = (MET.seen || 0) + 1; if (MET.seen % 2 === 0) { const q = questFlags(); if ((q.meteor || 0) < 20) questFlag("meteor", (q.meteor || 0) + 2); }
       MET.list.push({ x: sx, y: sy, dx, dy, sp: (fire ? 260 : 420) + Math.random() * 300, len: (fire ? 160 : 70) + Math.random() * 90, t: 0, life: (fire ? 1.3 : 0.55) + Math.random() * 0.4, w: fire ? 3.2 : 1.2 + Math.random() * 0.9, fire, lim });
     }
     if (sh && !MET.toasted && sh.act > 0.3) {
@@ -3729,7 +3740,7 @@ function startRide() {
   chip.hidden = false; trainHorn(); speak("歡迎搭乘樂學島環島小火車！");
 }
 function endRide() {
-  if (!RIDE.on) return; RIDE.on = false; controls.enabled = true;
+  if (!RIDE.on) return; RIDE.on = false; controls.enabled = true; questFlag("train");
   const c = $("#rideChip"); if (c) c.hidden = true;
   const st = TR.now, k = st.at != null ? st.at : st.to; toast("下車囉！這裡是" + TR.st[k].name + "。");
   focus.flyKey = ""; go(TR.st[k].go);
@@ -4387,6 +4398,7 @@ function openRide(key) {
 }
 function startParkRide(key) {
   closeModal(); stopTour(); if (!panelMin() && hasPanel()) setPanelMin(true, false);
+  questFlag("park");
   PARK.ride = { key, t: 0, dur: { wheel: 26, coaster: 22, drop: 16, swing: 16, carousel: 14, cups: 12 }[key] };
   tween.active = false; controls.enabled = false;
   let chip = $("#parkChip"); if (!chip) { chip = document.createElement("div"); chip.id = "parkChip"; chip.className = "ride-chip"; $("#app").appendChild(chip); }
@@ -4813,6 +4825,228 @@ function drawKart() {
   if (me.drift > 0) { x.fillStyle = me.drift > 0.7 ? "#FFB347" : "#9AD0FF"; x.fillRect(W / 2 - 60, H - 52, 120 * Math.min(1, me.drift / 1.8), 5); }
 }
 
+/* ===================== 校寵扭蛋：每位學生一個蒐集袋，扭蛋隨機得到一隻可愛校寵 ===================== */
+const PETS = [
+  { id: "millet", name: "小米穗穗", rar: "N", kind: "millet", c: "#F2C14E", c2: "#FFF3C4", desc: "頭上長著小米穗的小精靈，最喜歡收穫祭。跟牠在一起，做什麼都會有好收成！" },
+  { id: "muntjac", name: "山羌跳跳", rar: "N", kind: "muntjac", c: "#C98B55", c2: "#F5DDBF", desc: "住在大武山森林裡，一緊張就會「汪」一聲。跑得超快，最會躲貓貓。" },
+  { id: "bear", name: "黑熊胖胖", rar: "N", kind: "bear", c: "#3A3533", c2: "#F4F0E6", desc: "胸前有白色的Ｖ字月亮。看起來很大隻，其實很害羞，最愛吃果子。" },
+  { id: "fish", name: "飛魚啪啪", rar: "N", kind: "fish", c: "#5AA8E6", c2: "#E3F3FF", desc: "從蘭嶼游過來的飛魚，張開胸鰭就能在海面上滑翔好遠好遠。" },
+  { id: "magpie", name: "藍鵲啾啾", rar: "N", kind: "magpie", c: "#2F67C4", c2: "#DDE8FA", desc: "樂學島的老朋友，長長的尾巴是牠的驕傲。會幫大家找到藏起來的寶藏。" },
+  { id: "pangolin", name: "穿山甲捲捲", rar: "R", kind: "pangolin", c: "#B07A48", c2: "#F1D7B6", desc: "全身鱗片，害怕的時候會捲成一顆球。是挖洞高手，螞蟻是最愛的點心。" },
+  { id: "leopardcat", name: "石虎咪咪", rar: "R", kind: "leopardcat", c: "#D8A066", c2: "#FBEBD6", desc: "額頭有白色條紋，耳朵後面有白斑。是臺灣珍貴的小野貓，要好好保護牠。" },
+  { id: "eagle", name: "熊鷹咻咻", rar: "R", kind: "eagle", c: "#8A5A36", c2: "#F1E2CC", desc: "大武山天空的守護者，羽毛是勇士的榮耀。飛得高、看得遠。" },
+  { id: "jar", name: "陶壺壺壺", rar: "R", kind: "jar", c: "#9C5B34", c2: "#E7C49A", desc: "古老陶壺變成的精靈，肚子裡裝滿了祖先的故事。" },
+  { id: "pheasant", name: "帝雉帝帝", rar: "SR", kind: "pheasant", c: "#3B3F8F", c2: "#C7CCF2", desc: "臉頰紅紅、尾巴有白色橫紋，被稱為「迷霧中的王者」。很少出現，遇到牠真幸運！" },
+  { id: "bead", name: "琉璃珠珠", rar: "SR", kind: "bead", c: "#2BB3C0", c2: "#F2C14E", desc: "閃閃發亮的琉璃珠精靈，每一顆珠子都代表一個祝福。" },
+  { id: "leopard", name: "雲豹寶寶", rar: "SSR", kind: "leopard", c: "#C9A97A", c2: "#F4E8D2", desc: "身上有雲朵般的花紋，是傳說中的山林之王。據說只有最認真的孩子才遇得到！" }
+];
+const PET_LEGEND = { id: "king", name: "大武山雲豹王", rar: "UR", kind: "king", c: "#D9B45A", c2: "#FFF4CF", desc: "大武山的守護者。只有集滿九片拼圖、解開大武山之謎的勇士，才能和牠成為夥伴。", legend: true };
+const PET_RAR = { N: ["普通", "#9AA3AD", 55], R: ["稀有", "#4AA8FF", 30], SR: ["超稀有", "#B48CFF", 12], SSR: ["傳說", "#F2C14E", 3], UR: ["神話", "#FF6FB5", 0] };
+const petById = id => PETS.find(p => p.id === id) || (id === "king" ? PET_LEGEND : null);
+const petBag = () => store("pets") || { owned: {}, used: 0, order: [] };
+function visitDays() { const d = store("days") || []; const k = todayKey(); if (d.indexOf(k) < 0) { d.push(k); store("days", d.slice(-400)); } return d.length; }
+const capsules = () => { const b = petBag(); return Math.max(0, 1 + visitDays() + Object.keys(store("certs") || {}).length + questDone().length - (b.used || 0)); };
+function rollPet() {
+  let r = Math.random() * 100, rar = "N";
+  for (const k of ["SSR", "SR", "R", "N"]) { if ((r -= PET_RAR[k][2]) <= 0 || k === "N") { rar = k; break; } }
+  const pool = PETS.filter(p => p.rar === rar), owned = petBag().owned;
+  // 小小保底：同稀有度裡，優先給還沒有的
+  const fresh = pool.filter(p => !owned[p.id]);
+  const list = fresh.length && Math.random() < 0.6 ? fresh : pool;
+  return list[Math.floor(Math.random() * list.length)];
+}
+function addPet(p) { const b = petBag(); b.owned[p.id] = (b.owned[p.id] || 0) + 1; if (b.order.indexOf(p.id) < 0) b.order.push(p.id); store("pets", b); }
+// 畫一隻校寵（原創 Q 版造型）
+function drawPet(x, p, cx, cy, s, t) {
+  t = t || 0; const k = p.kind, C = p.c, C2 = p.c2, bob = Math.sin(t * 3) * s * 0.02;
+  x.save(); x.translate(cx, cy + bob); x.lineJoin = "round"; x.lineCap = "round";
+  const E = (ex, ey, rx, ry, col) => { x.fillStyle = col; x.beginPath(); x.ellipse(ex * s, ey * s, rx * s, ry * s, 0, 0, 7); x.fill(); };
+  const P = (pts, col) => { x.fillStyle = col; x.beginPath(); pts.forEach((q, i) => i ? x.lineTo(q[0] * s, q[1] * s) : x.moveTo(q[0] * s, q[1] * s)); x.closePath(); x.fill(); };
+  E(0, 0.46, 0.36, 0.07, "rgba(0,0,0,.15)");   // 影子
+  // 背後的部件
+  if (k === "magpie") { P([[-0.15, 0.2], [-0.62, 0.42], [-0.66, 0.3], [-0.2, 0.08]], C); P([[-0.6, 0.43], [-0.72, 0.46], [-0.74, 0.32], [-0.64, 0.3]], "#FFFFFF"); }
+  if (k === "pheasant") { P([[-0.15, 0.2], [-0.7, 0.3], [-0.7, 0.18], [-0.2, 0.05]], "#3B3F8F"); [-0.35, -0.5, -0.62].forEach(xx => E(xx, 0.2, 0.025, 0.06, "#FFFFFF")); }
+  if (k === "leopard" || k === "leopardcat" || k === "king") { x.strokeStyle = C; x.lineWidth = s * 0.1; x.beginPath(); x.moveTo(-0.28 * s, 0.28 * s); x.quadraticCurveTo(-0.6 * s, 0.25 * s, -0.55 * s, -0.05 * s); x.stroke(); }
+  if (k === "fish") { P([[-0.3, 0.1], [-0.6, -0.1], [-0.55, 0.12], [-0.6, 0.32]], C); P([[0.05, 0.02], [-0.3, -0.42], [0.2, -0.12]], "rgba(150,210,255,.9)"); P([[0.05, 0.12], [0.45, -0.3], [0.32, 0.06]], "rgba(150,210,255,.9)"); }
+  if (k === "eagle") { P([[-0.3, 0.05], [-0.62, 0.1], [-0.3, 0.3]], "#6B4426"); P([[0.3, 0.05], [0.62, 0.1], [0.3, 0.3]], "#6B4426"); }
+  if (k === "king") { const g = x.createRadialGradient(0, 0, s * 0.1, 0, 0, s * 0.75); g.addColorStop(0, "rgba(255,230,140,.7)"); g.addColorStop(1, "rgba(255,230,140,0)"); x.fillStyle = g; x.beginPath(); x.arc(0, 0, s * 0.75, 0, 7); x.fill(); }
+  // 身體
+  if (k === "jar") { E(0, 0.12, 0.36, 0.33, C); x.fillStyle = C; x.fillRect(-0.16 * s, -0.36 * s, 0.32 * s, 0.22 * s); E(0, -0.37, 0.2, 0.05, "#7A4428"); x.fillStyle = "#E7C49A"; for (let i = -2; i <= 2; i++) { x.save(); x.translate(i * 0.12 * s, 0.28 * s); x.rotate(Math.PI / 4); x.fillRect(-0.035 * s, -0.035 * s, 0.07 * s, 0.07 * s); x.restore(); } }
+  else if (k === "bead") { const g = x.createRadialGradient(-0.1 * s, -0.12 * s, s * 0.05, 0, 0, s * 0.4); g.addColorStop(0, "#BFF6FF"); g.addColorStop(1, C); x.fillStyle = g; x.beginPath(); x.arc(0, 0.05 * s, 0.38 * s, 0, 7); x.fill(); x.strokeStyle = C2; x.lineWidth = s * 0.05; x.beginPath(); x.arc(0, 0.05 * s, 0.3 * s, 0, 7); x.stroke(); [0, 1, 2, 3, 4, 5].forEach(i => { const a = i / 6 * Math.PI * 2; E(Math.cos(a) * 0.3, 0.05 + Math.sin(a) * 0.3, 0.04, 0.04, "#B5322A"); }); }
+  else if (k === "fish") { E(0, 0.08, 0.38, 0.27, C); E(0.04, 0.16, 0.26, 0.13, C2); }
+  else { const bw = k === "bear" ? 0.38 : k === "pangolin" ? 0.37 : 0.34; E(0, 0.15, bw, 0.3, C); E(0, 0.22, bw * 0.6, 0.19, C2); }
+  // 頭部的部件（耳朵等）
+  if (["leopard", "leopardcat", "king", "bear"].includes(k)) { [-1, 1].forEach(d => { E(d * 0.22, -0.13, 0.11, 0.11, C); E(d * 0.22, -0.12, 0.06, 0.06, k === "leopardcat" ? "#FFFFFF" : "#F2B6B6"); }); }
+  if (k === "muntjac") { [-1, 1].forEach(d => { x.save(); x.translate(d * 0.25 * s, -0.12 * s); x.rotate(d * 0.6); E(0, 0, 0.07, 0.13, C); E(0, 0.01, 0.035, 0.08, "#F2B6B6"); x.restore(); x.strokeStyle = "#7A5230"; x.lineWidth = s * 0.035; x.beginPath(); x.moveTo(d * 0.1 * s, -0.14 * s); x.lineTo(d * 0.14 * s, -0.3 * s); x.lineTo(d * 0.08 * s, -0.38 * s); x.stroke(); }); }
+  if (k === "millet") { x.strokeStyle = "#7FA34A"; x.lineWidth = s * 0.03; x.beginPath(); x.moveTo(0, -0.14 * s); x.quadraticCurveTo(0.05 * s, -0.3 * s, 0.18 * s, -0.36 * s); x.stroke(); for (let i = 0; i < 9; i++) E(0.04 + i * 0.018, -0.25 - i * 0.015 + (i % 2) * 0.03, 0.035, 0.035, "#E8B33A"); }
+  if (k === "eagle") { P([[-0.08, -0.13], [0, -0.3], [0.06, -0.13]], "#6B4426"); P([[0.04, -0.12], [0.14, -0.25], [0.14, -0.1]], "#6B4426"); }
+  if (k === "magpie") { E(0, -0.18, 0.3, 0.22, "#1C2233"); }
+  if (k === "pheasant") { E(0, -0.18, 0.3, 0.22, "#2A2D6B"); }
+  if (k === "king") { const cols = ["#B5322A", "#E8B33A", "#232323"]; for (let i = -2; i <= 2; i++) { x.save(); x.translate(i * 0.09 * s, -0.17 * s); x.rotate(i * 0.25); P([[-0.035, 0], [0, -0.3], [0.035, 0]], i % 2 ? "#FFFFFF" : "#6B4426"); x.restore(); } x.fillStyle = cols[0]; x.fillRect(-0.24 * s, -0.21 * s, 0.48 * s, 0.07 * s); x.fillStyle = cols[1]; for (let i = -2; i <= 2; i++) { x.beginPath(); x.arc(i * 0.1 * s, -0.175 * s, 0.022 * s, 0, 7); x.fill(); } }
+  // 花紋
+  if (k === "leopard" || k === "king") { [[-0.25, 0.08], [0.25, 0.06], [-0.14, 0.32], [0.2, 0.3]].forEach(([a, b]) => { x.strokeStyle = "#6B5032"; x.lineWidth = s * 0.03; x.beginPath(); x.ellipse(a * s, b * s, 0.06 * s, 0.045 * s, 0.3, 0, 7); x.stroke(); }); }
+  if (k === "leopardcat") { x.strokeStyle = "#FFFFFF"; x.lineWidth = s * 0.025; [-0.04, 0.04].forEach(d => { x.beginPath(); x.moveTo(d * s, -0.15 * s); x.lineTo(d * s, -0.04 * s); x.stroke(); }); [[-0.24, 0.1], [0.24, 0.12], [-0.2, 0.3], [0.2, 0.3]].forEach(([a, b]) => E(a, b, 0.03, 0.03, "#7A5230")); }
+  if (k === "bear") { P([[-0.13, 0.02], [0, 0.12], [0.13, 0.02], [0.08, 0.02], [0, 0.07], [-0.08, 0.02]], "#F4F0E6"); }
+  if (k === "pangolin") { x.strokeStyle = "#7A5230"; x.lineWidth = s * 0.02; for (let r = 0; r < 2; r++) for (let i = -2; i <= 1; i++) { x.beginPath(); x.arc((i * 0.1 + (r % 2) * 0.05) * s, (-0.28 + r * 0.05) * s, 0.045 * s, 0, Math.PI); x.stroke(); } }
+  // 臉
+  const fy = k === "jar" ? 0.05 : k === "bead" ? 0.02 : -0.1;
+  [-1, 1].forEach(d => { E(d * 0.12, fy, 0.065, 0.08, "#1E1B1A"); E(d * 0.12 + 0.02, fy - 0.03, 0.025, 0.03, "#FFFFFF"); E(d * 0.12 - 0.015, fy + 0.03, 0.012, 0.012, "#FFFFFF"); E(d * 0.22, fy + 0.09, 0.055, 0.03, "rgba(255,120,140,.45)"); });
+  if (["eagle", "magpie", "pheasant"].includes(k)) P([[-0.05, fy + 0.07], [0.05, fy + 0.07], [0, fy + 0.15]], k === "magpie" ? "#D8322B" : "#F2B33A");
+  else { x.strokeStyle = "#3A2A22"; x.lineWidth = s * 0.02; x.beginPath(); x.arc(-0.03 * s, (fy + 0.1) * s, 0.03 * s, 0, Math.PI); x.arc(0.03 * s, (fy + 0.1) * s, 0.03 * s, 0, Math.PI); x.stroke(); }
+  if (k === "pheasant") { [-1, 1].forEach(d => E(d * 0.12, fy, 0.11, 0.12, "rgba(216,50,43,.35)")); }
+  if (["leopard", "leopardcat", "king", "bear", "muntjac"].includes(k)) E(0, fy + 0.07, 0.03, 0.022, "#3A2A22");
+  // 小腳
+  if (!["fish", "bead", "jar"].includes(k)) [-1, 1].forEach(d => E(d * 0.15, 0.43, 0.08, 0.045, k === "bear" ? "#2A2523" : C));
+  if (k === "bead" || k === "king" || p.rar === "SSR") { x.fillStyle = "#FFF"; [[0.35, -0.35], [-0.38, -0.2], [0.42, 0.1]].forEach(([a, b], i) => { const r = (0.03 + 0.015 * Math.sin(t * 4 + i)) * s; x.beginPath(); x.moveTo(a * s, b * s - r * 2); x.lineTo(a * s + r * 0.6, b * s); x.lineTo(a * s, b * s + r * 2); x.lineTo(a * s - r * 0.6, b * s); x.fill(); }); }
+  x.restore();
+}
+function petCanvas(p, size, owned) {
+  const cv = document.createElement("canvas"), d = Math.min(2, devicePixelRatio || 1); cv.width = cv.height = size * d; cv.style.width = cv.style.height = size + "px";
+  const x = cv.getContext("2d"); x.scale(d, d);
+  if (owned === false) { x.filter = "brightness(0) opacity(.25)"; }
+  drawPet(x, p, size / 2, size * 0.5, size * 0.9, 0);
+  return cv;
+}
+function animPet(cv, p, size) {
+  const x = cv.getContext("2d"), d = cv.width / size, t0 = performance.now();
+  const f = now => { if (!cv.isConnected) return; x.setTransform(d, 0, 0, d, 0, 0); x.clearRect(0, 0, size, size); drawPet(x, p, size / 2, size * 0.5, size * 0.9, (now - t0) / 1000); requestAnimationFrame(f); };
+  requestAnimationFrame(f);
+}
+function rarTag(r) { const R = PET_RAR[r]; return '<span class="pet-rar" style="--rc:' + R[1] + '">' + "★".repeat({ N: 1, R: 2, SR: 3, SSR: 4, UR: 5 }[r]) + ' ' + R[0] + '</span>'; }
+function openGacha() {
+  modalBack = (location.hash || "#home").replace(/^#/, ""); if (["gacha", "pets"].includes(modalBack)) modalBack = "home";
+  const n = capsules(), cols = ["#F2A9BE", "#8CB6D6", "#F2C14E", "#9CC59A", "#B7A0D6", "#F28C6A"];
+  openModal('<div class="m-head"><h1>🥚 校寵扭蛋機</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<p class="p-lede">轉一下扭蛋機，打開扭蛋就會得到一隻校寵！你還有 <b id="capN">' + n + '</b> 顆扭蛋。<br><small>每天第一次上島送 1 顆，每拿到一張學習證書、每找到一片大武山拼圖，也各送 1 顆。</small></p>' +
+    '<div class="gacha"><div class="g-dome">' + [[8, 62], [28, 70], [48, 66], [66, 70], [14, 44], [34, 50], [54, 46], [70, 48], [22, 26], [42, 30], [60, 28], [6, 30], [40, 10], [74, 14]].map(([px, py], i) => '<i style="--c:' + cols[i % 6] + ';--x:' + px + '%;--y:' + py + '%;--d:' + (i * 0.13).toFixed(2) + 's"></i>').join("") + '</div>' +
+    '<div class="g-body"><div class="g-band"></div><button class="g-knob" id="gKnob" aria-label="轉動扭蛋機"' + (n ? "" : " disabled") + '><span></span></button><div class="g-slot"><i id="gDrop"></i></div><b class="g-name">嘉蘭校寵</b></div></div>' +
+    '<div id="gStage" class="g-stage" hidden></div>' +
+    '<div class="row" style="justify-content:center;margin-top:10px"><button class="btn" id="gSpin"' + (n ? "" : " disabled") + '>🔄 轉一次</button><button class="btn ghost" data-go="pets">👜 我的蒐集袋</button></div>' +
+    (n ? "" : '<p class="small" style="text-align:center">扭蛋用完了！明天上島、拿證書或找拼圖都能再得到。</p>'), "npc-sheet gacha-sheet");
+  $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
+  const spin = () => {
+    if (capsules() < 1 || openGacha.busy) return; openGacha.busy = true;
+    const b = petBag(); b.used = (b.used || 0) + 1; store("pets", b); updateCertCount();
+    const pet = rollPet(), isNew = !petBag().owned[pet.id]; addPet(pet);   // 先收進蒐集袋，中途關掉視窗也不會不見
+    const knob = $("#gKnob"), drop = $("#gDrop"), col = cols[Math.floor(Math.random() * 6)];
+    knob.classList.add("spin"); $(".g-dome").classList.add("shake");
+    const ctx = sfxAudio(); for (let i = 0; i < 6; i++) setTimeout(() => kartBeep && kartBeep(300 + i * 40, 0.04, 0.08), i * 140);
+    setTimeout(() => { drop.style.setProperty("--c", col); drop.classList.add("fall"); kartBeep(520, 0.12, 0.1); }, 900);
+    setTimeout(() => {
+      const st = $("#gStage"); st.hidden = false;
+      st.innerHTML = '<div class="cap" id="gCap" style="--c:' + col + '"><i class="top"></i><i class="bot"></i><small>點一下打開！</small></div>';
+      speak("點一下，打開扭蛋！"); sheetScroll(st);
+      $("#gCap").addEventListener("click", function open() {
+        this.removeEventListener("click", open); this.classList.add("open"); kartBeep(880, 0.1, 0.12);
+        setTimeout(() => {
+          st.innerHTML = '<div class="pet-reveal r-' + pet.rar + '"><div class="rays"></div><div class="pet-cv" id="gPet"></div><div class="pet-info">' + rarTag(pet.rar) + '<h2>' + esc(pet.name) + (isNew ? ' <span class="new">NEW!</span>' : "") + '</h2><p>' + esc(pet.desc) + '</p></div></div>';
+          const cv = petCanvas(pet, 200); $("#gPet").appendChild(cv); animPet(cv, pet, 200);
+          if (["SR", "SSR"].includes(pet.rar)) { playCheer(false); confetti(2800); } else playChime();
+          speak((isNew ? "恭喜！新的校寵：" : "又遇到了：") + pet.name + "。");
+          $("#capN").textContent = capsules(); const can = capsules() > 0;
+          $("#gSpin").disabled = !can; $("#gKnob").disabled = !can; knob.classList.remove("spin"); $(".g-dome").classList.remove("shake"); drop.classList.remove("fall");
+          openGacha.busy = false; checkQuest();
+        }, 650);
+      });
+    }, 1700);
+  };
+  $("#gSpin").addEventListener("click", spin); $("#gKnob").addEventListener("click", spin);
+}
+function openPets() {
+  modalBack = "home";
+  const b = petBag(), all = PETS.concat(questComplete() || b.owned.king ? [PET_LEGEND] : []), got = all.filter(p => b.owned[p.id]).length;
+  openModal('<div class="m-head"><h1>👜 我的蒐集袋</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<p class="p-lede">已收集 <b>' + got + ' / ' + all.length + '</b> 種校寵。灰色剪影是還沒遇到的校寵，轉扭蛋說不定就是牠！</p>' +
+    '<div class="pet-grid">' + all.map(p => { const n = b.owned[p.id] || 0; return '<button class="pet-cell' + (n ? "" : " lock") + '" data-pet="' + p.id + '" style="--rc:' + PET_RAR[p.rar][1] + '"><span class="pc" data-c="' + p.id + '"></span><b>' + (n ? esc(p.name) : "？？？") + '</b>' + (n > 1 ? '<em>×' + n + '</em>' : "") + '<small>' + PET_RAR[p.rar][0] + '</small></button>'; }).join("") + '</div>' +
+    '<div class="row" style="justify-content:center;margin-top:12px"><button class="btn" data-go="gacha">🥚 去轉扭蛋（' + capsules() + '）</button></div>', "list");
+  $all(".pet-cell").forEach(c => { const p = petById(c.getAttribute("data-pet")), n = b.owned[p.id]; c.querySelector(".pc").appendChild(petCanvas(p, 84, !!n));
+    c.addEventListener("click", () => { if (!n) { toast("還沒遇到這隻校寵，轉扭蛋試試看！"); return; }
+      openModal('<div class="m-head"><h1>' + esc(p.name) + '</h1><button class="m-close" aria-label="關閉">×</button></div><div class="pet-reveal r-' + p.rar + '"><div class="pet-cv" id="gPet"></div><div class="pet-info">' + rarTag(p.rar) + '<p>' + esc(p.desc) + '</p><p class="small">擁有 ' + n + ' 隻</p></div></div><div class="row" style="justify-content:center"><button class="btn ghost" id="petBack">← 回蒐集袋</button></div>', "npc-sheet");
+      const cv = petCanvas(p, 200); $("#gPet").appendChild(cv); animPet(cv, p, 200); speak(p.name + "。" + p.desc); $("#petBack").addEventListener("click", openPets); }); });
+  $all("#modal [data-go]").forEach(x => x.addEventListener("click", () => go(x.getAttribute("data-go"))));
+}
+
+/* ===================== 主線解謎：九片拼圖，解開大武山之謎 ===================== */
+const QUEST = [
+  { id: "kart", icon: "🏎", name: "賽道冠軍", hint: "在飆速卡丁車島跑進前三名", go: "kart", ok: () => !!(store("puzzle") || {}).kart },
+  { id: "bird", icon: "🐦", name: "藍鵲的朋友", hint: "找到藏在島上的 10 隻台灣藍鵲", ok: () => (store("birds") || []).length >= 10, prog: () => (store("birds") || []).length + "/10" },
+  { id: "cert", icon: "🎓", name: "認真的學習者", hint: "拿到 3 張學習證書", go: "g6-chinese", ok: () => Object.keys(store("certs") || {}).length >= 3, prog: () => Object.keys(store("certs") || {}).length + "/3" },
+  { id: "fest", icon: "🎉", name: "節慶的參與者", hint: "在節慶活動當天到操場簽到", go: "hub", ok: () => Object.keys(store("stamps") || {}).length >= 1 },
+  { id: "meteor", icon: "🌠", name: "流星的觀測者", hint: "晚上在樂學島的夜空中看到 20 顆流星（流星雨期間最多）", ok: () => (questFlags().meteor || 0) >= 20, prog: () => Math.min(20, questFlags().meteor || 0) + "/20" },
+  { id: "train", icon: "🚃", name: "環島旅人", hint: "搭環島小火車，在任何一站下車", go: "train", ok: () => !!questFlags().train },
+  { id: "park", icon: "🎡", name: "樂園探險家", hint: "到琉璃珠夢幻樂園搭一項遊樂設施", go: "park", ok: () => !!questFlags().park },
+  { id: "card", icon: "🃏", name: "魔法卡收藏家", hint: "把 5 張魔法卡收進卡冊", ok: () => cardBook().length >= 5, prog: () => Math.min(5, cardBook().length) + "/5" },
+  { id: "pet", icon: "🥚", name: "校寵好朋友", hint: "收集 5 種不同的校寵", go: "gacha", ok: () => Object.keys(petBag().owned).filter(k => k !== "king").length >= 5, prog: () => Math.min(5, Object.keys(petBag().owned).filter(k => k !== "king").length) + "/5" }
+];
+const questFlags = () => store("quest") || {};
+function questFlag(k, v) { const q = questFlags(); q[k] = v === undefined ? true : v; store("quest", q); checkQuest(); }
+const questDone = () => QUEST.filter(q => { try { return q.ok(); } catch (e) { return false; } }).map(q => q.id);
+const questComplete = () => questDone().length >= QUEST.length;
+function checkQuest() {
+  const done = questDone(), seen = store("questSeen") || [];
+  const fresh = done.filter(id => seen.indexOf(id) < 0);
+  if (!fresh.length) return;
+  store("questSeen", seen.concat(fresh)); updateCertCount();
+  const q = QUEST.find(x => x.id === fresh[0]);
+  setTimeout(() => { toast("🧩 獲得大武山拼圖碎片「" + q.name + "」！（" + done.length + "/9）還多了 1 顆校寵扭蛋！"); kartBeep(988, 0.15, 0.12); setTimeout(() => kartBeep(1318, 0.25, 0.12), 150); }, 600);
+  if (done.length >= QUEST.length) setTimeout(() => { refreshLabels(); toast("⛰ 九片拼圖都到齊了！大武山的入口打開了……", true); }, 4200);
+}
+let puzzleImg = null;
+function drawPuzzleArt() {
+  if (puzzleImg) return puzzleImg;
+  const W = 600, cv = document.createElement("canvas"); cv.width = cv.height = W; const x = cv.getContext("2d");
+  const sky = x.createLinearGradient(0, 0, 0, W); sky.addColorStop(0, "#2A3E73"); sky.addColorStop(0.45, "#F6B06A"); sky.addColorStop(0.62, "#FFE0A8"); x.fillStyle = sky; x.fillRect(0, 0, W, W);
+  x.fillStyle = "#FFF4CF"; x.beginPath(); x.arc(W * 0.66, W * 0.42, 52, 0, 7); x.fill();
+  for (let i = 0; i < 16; i++) { x.save(); x.translate(W * 0.66, W * 0.42); x.rotate(i / 16 * Math.PI * 2); x.fillStyle = "rgba(255,240,190,.35)"; x.fillRect(60, -4, 70, 8); x.restore(); }
+  [[0.62, "#3F6B52"], [0.7, "#2E5640"], [0.8, "#24472F"]].forEach(([h, c], i) => { x.fillStyle = c; x.beginPath(); x.moveTo(0, W); for (let k = 0; k <= 12; k++) { const px = k / 12 * W, py = W * h - Math.sin(k * 0.9 + i) * 40 - (k === 5 && i === 0 ? 150 : 0) - (k === 4 || k === 6) * (i === 0 ? 70 : 0); x.lineTo(px, py); } x.lineTo(W, W); x.fill(); });
+  x.fillStyle = "#1F6FB2"; x.fillRect(0, W * 0.88, W, W * 0.12);
+  // 雲豹王剪影
+  drawPet(x, PET_LEGEND, W * 0.32, W * 0.73, 170, 0);
+  // 排灣菱形紋外框
+  x.strokeStyle = "#E8B33A"; x.lineWidth = 14; x.strokeRect(7, 7, W - 14, W - 14);
+  for (let i = 0; i < 20; i++) { const p = 15 + i * 29; [[p, 7], [p, W - 7], [7, p], [W - 7, p]].forEach(([a, b]) => { x.fillStyle = i % 2 ? "#B5322A" : "#232323"; x.beginPath(); x.moveTo(a, b - 6); x.lineTo(a + 6, b); x.lineTo(a, b + 6); x.lineTo(a - 6, b); x.fill(); }); }
+  x.fillStyle = "#FFFFFF"; x.font = "bold 46px 'LXGW WenKai TC', 'Noto Serif TC', serif"; x.textAlign = "center"; x.shadowColor = "rgba(0,0,0,.4)"; x.shadowBlur = 8; x.fillText("大武山的守護者", W / 2, 92);
+  return (puzzleImg = cv);
+}
+function openPuzzle() {
+  modalBack = (location.hash || "#home").replace(/^#/, ""); if (modalBack === "puzzle") modalBack = "home";
+  const done = questDone(), all = done.length >= QUEST.length;
+  openModal('<div class="m-head"><h1>⛰ 大武山之謎</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<p class="p-lede">' + (all ? "九片拼圖到齊了！大武山的入口已經打開。" : "傳說大武山的入口被分成九片拼圖，藏在嘉蘭樂學島各個角落。集滿九片，就能解開大武山之謎！") + '</p>' +
+    '<div class="pz-wrap"><div class="pz-board" id="pzBoard"></div><div class="pz-list">' + QUEST.map((q, i) => { const ok = done.indexOf(q.id) >= 0; return '<div class="pz-item' + (ok ? " ok" : "") + '"><span class="pz-n">' + (i + 1) + '</span><span class="pz-ic">' + q.icon + '</span><div><b>' + q.name + (ok ? " ✓" : "") + '</b><small>' + q.hint + (q.prog && !ok ? "（" + q.prog() + "）" : "") + '</small></div>' + (!ok && q.go ? '<button class="pill" data-go="' + q.go + '">去看看</button>' : "") + '</div>'; }).join("") + '</div></div>' +
+    (all ? '<div class="row" style="justify-content:center;margin-top:12px"><button class="btn" id="pzMountain">⛰ 進入大武山</button></div>' : ""), "cabinet-sheet");
+  const board = $("#pzBoard"), img = drawPuzzleArt();
+  QUEST.forEach((q, i) => { const ok = done.indexOf(q.id) >= 0, c = document.createElement("canvas"); c.width = c.height = 200; const x = c.getContext("2d");
+    if (ok) x.drawImage(img, (i % 3) * 200, Math.floor(i / 3) * 200, 200, 200, 0, 0, 200, 200);
+    else { x.fillStyle = "#E9E2D2"; x.fillRect(0, 0, 200, 200); x.fillStyle = "#B9AE96"; x.font = "bold 80px Georgia"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("?", 100, 104); }
+    const cell = document.createElement("div"); cell.className = "pz-cell" + (ok ? " ok" : ""); cell.title = q.name; cell.appendChild(c); board.appendChild(cell); });
+  $all("#modal [data-go]").forEach(b => b.addEventListener("click", () => go(b.getAttribute("data-go"))));
+  const m = $("#pzMountain"); if (m) m.addEventListener("click", openMountain);
+}
+function openMountain() {
+  modalBack = "home";
+  const firstTime = !petBag().owned.king;
+  if (firstTime) { addPet(PET_LEGEND); }
+  openModal('<div class="m-head"><h1>⛰ 大武山</h1><button class="m-close" aria-label="關閉">×</button></div>' +
+    '<div class="pet-reveal r-UR"><div class="rays"></div><div class="pet-cv" id="gPet"></div><div class="pet-info">' + rarTag("UR") + '<h2>' + PET_LEGEND.name + (firstTime ? ' <span class="new">NEW!</span>' : "") + '</h2>' +
+    '<p>你集滿了九片拼圖，大武山的守護者出現了！大武山是排灣族和魯凱族心中神聖的山，守護著山下的部落和孩子。雲豹王決定成為你的夥伴，陪你繼續在樂學島探險。</p>' +
+    '<p class="small">大武山還有更多秘境，之後會陸續開放，敬請期待！</p></div></div>', "npc-sheet");
+  const cv = petCanvas(PET_LEGEND, 220); $("#gPet").appendChild(cv); animPet(cv, PET_LEGEND, 220);
+  if (firstTime) { playCheer(); confetti(4000); speak("恭喜你解開大武山之謎！大武山雲豹王成為你的夥伴！"); }
+}
+
+function makeGachaMachine() {
+  // 嘉蘭國小校門內的扭蛋機
+  const g = new THREE.Group(); g.position.set(1.4, 0, 8.1);
+  g.add(part(box(0.9, 1.0, 0.8), M("#D3322B"), 0, 0.5, 0)); g.add(part(box(0.92, 0.12, 0.82), M("#F2C14E"), 0, 0.82, 0));
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.48, 18, 14), new THREE.MeshStandardMaterial({ color: "#DDF3FF", transparent: true, opacity: 0.45, roughness: 0.1 })); dome.position.y = 1.38; g.add(dome);
+  ["#F2A9BE", "#8CB6D6", "#F2C14E", "#9CC59A", "#B7A0D6", "#F28C6A"].forEach((c, i) => g.add(part(sph(0.13, 10, 8), M(c), Math.cos(i * 1.1) * 0.22, 1.18 + (i % 3) * 0.11, Math.sin(i * 1.1) * 0.22)));
+  g.add(part(cyl(0.14, 0.14, 0.06, 12), M("#FFFFFF"), 0, 0.55, 0.42, Math.PI / 2, 0, 0)); g.add(part(box(0.25, 0.05, 0.05), M("#888"), 0, 0.55, 0.46));
+  g.add(part(cyl(0.12, 0.12, 0.2, 10), M("#F2C14E"), 0, 1.92, 0));
+  const hit = new THREE.Mesh(box(1.2, 2.2, 1.2), new THREE.MeshBasicMaterial({ visible: false })); hit.position.y = 1; hit.userData = { pick: true, type: "gacha" }; g.add(hit); pickables.push(hit);
+  scene.add(g); const an = new THREE.Object3D(); an.position.set(1.4, 2.6, 8.1); scene.add(an);
+  addLabel(an, 0, "npc", { type: "gachaLbl", name: "校寵扭蛋機" }, () => go("gacha"));
+}
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -4991,6 +5225,9 @@ function route() {
   if (h !== "home") hideHero();
   if (h === "fireworks") { openFireworks(); return; }
   if (h === "card") { openDailyCard(false); return; }
+  if (h === "gacha") { openGacha(); return; }
+  if (h === "pets") { openPets(); return; }
+  if (h === "puzzle") { openPuzzle(); return; }
   if (h === "cards") { openCardBook(); return; }
   if (h === "kart") { if (panelMin()) setPanelMin(false, false); focus.g = 10; focus.key = null; panelKart(); fly("kart", kartPose); }
   else if (h === "park") { if (panelMin()) setPanelMin(false, false); focus.g = 9; focus.key = null; panelPark(); fly("park", parkPose); }
@@ -5348,7 +5585,7 @@ function start() {
   updateHint(); updateFootprints(); applyTime(); loadWeather();
   addEventListener("hashchange", route); route();
   loadRegistry().then(() => { refreshOpenState(); if (location.hash === "#teacher" && teacherUnlocked()) openTeacher(); });
-  maybeDailyPaper(); maybeDailyCard();
+  maybeDailyPaper(); maybeDailyCard(); visitDays(); setTimeout(checkQuest, 6000); setInterval(checkQuest, 8000);
   if (!ok && !location.hash) go("list");
   else if (!store("guided") && (!location.hash || location.hash === "#home")) setTimeout(() => { if (!location.hash || location.hash === "#home") go("guide"); }, 1200);
   setInterval(() => { if (!override) applyTime(); }, 30000);
