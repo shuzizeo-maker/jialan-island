@@ -1921,6 +1921,7 @@ function labelMode(L) {
   if (L.kind === "npc" && L.data.type === "gachaLbl") return focus.g === 0 && !FEST.npc ? "fixed" : "hide";
   if (L.kind === "npc") return (L.data.type === "host" ? focus.g === 0 : (focus.g === L.data.g && !FEST.npc)) ? "fixed" : "hide";
   if (L.kind === "fest") return (focus.g === 0 || focus.g === null) ? "fixed" : "hide";
+  if (L.kind === "animal") return focus.g === 11 ? "fixed" : "hide";
   if (L.kind === "park") return focus.g === 9 && !PARK.ride && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "ferry") return (focus.g === 9 || focus.g === 7 || focus.g === null) && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "station") return focus.g === 8 && !RIDE.on ? "fixed" : "hide";
@@ -1952,6 +1953,9 @@ function renderLabel(L, mode) {
     if (s) L.el.style.setProperty("--s", s.color);
     L.el.setAttribute("aria-label", host ? "島主" + d.name + "，點我問問題" : d.name + "，" + GRADES[d.g - 1].name + s.name + "助教");
     L.el.innerHTML = host ? '<i>主</i><span>島主．' + esc(d.name) + '</span>' : '<i>' + esc(s.name[0]) + '</i><span>' + esc(d.name) + '</span>';
+  } else if (L.kind === "animal") {
+    const a = d.a, seen = zooSeen()[a.id]; L.el.className = "lbl npc station"; L.el.style.setProperty("--s", IUCN[a.st][1]);
+    L.el.innerHTML = '<i>' + (seen ? "✅" : "🐾") + '</i><span>' + esc(a.name) + '</span>';
   } else if (L.kind === "park") {
     L.el.className = "lbl npc station"; L.el.style.setProperty("--s", "#8A5CC2");
     L.el.innerHTML = '<i>' + ({ wheel: "🎡", coaster: "🎢", drop: "🐟", swing: "🛶", carousel: "🐆", cups: "🏺" }[d.key]) + '</i><span>' + esc(d.name) + '</span>';
@@ -1983,7 +1987,7 @@ function updateLabels() {
   if (FW.active || PARK.ride || PARK.boarded) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
   labels.forEach(L => {
     const m = labelMode(L); if (m !== L.mode) renderLabel(L, m);
-    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry"].includes(L.kind)) && L.mode !== "hide";
+    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry", "animal"].includes(L.kind)) && L.mode !== "hide";
     if (L.kind === "grade" && L.data.g && focus.g === L.data.g && focus.key) show = false;
     if (!show) { L.el.style.visibility = "hidden"; return; }
     L.obj.getWorldPosition(_v); _v.y += L.offY; _v.project(camera);
@@ -2017,7 +2021,7 @@ function pickAt(cx, cy) {
   ray.setFromCamera(ptr, camera);
   const hits = ray.intersectObjects(pickables, false);
   if (!hits.length) return null;
-  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "bird", "mascot", "building"];
+  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "animal", "bird", "mascot", "building"];
   for (const t of pri) { const h = hits.find(x => x.object.userData.type === t); if (h) return h.object.userData; }
   return hits[0].object.userData;
 }
@@ -2032,6 +2036,8 @@ function onPick(u) {
   if (u.type === "park" || u.type === "ferry") return go("park");
   if (u.type === "kart") return go("kart");
   if (u.type === "gacha") return go("gacha");
+  if (u.type === "animal") return openAnimal(u.id);
+  if (u.type === "zoo") return go("zoo");
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2073,7 +2079,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine(); makeZoo();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2087,7 +2093,7 @@ function initWorld() {
   renderer.setAnimationLoop(() => {
     if (KG.on) { last = performance.now(); return; }   // 玩卡丁車時暫停 3D 畫面，省電又順暢
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now; time += ui.paused ? 0 : dt;
-    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt);
+    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt); stepZoo(dt, time);
     scene.children.forEach(o => { if (o.userData.follow) o.position.copy(camera.position); });
     if (sunMesh.userData.dir) sunMesh.position.copy(camera.position).addScaledVector(sunMesh.userData.dir, 600);
     if (moonSprite.userData.dir) moonSprite.position.copy(camera.position).addScaledVector(moonSprite.userData.dir, 580);
@@ -2597,6 +2603,7 @@ function bagItems() {
   return [["🎓", "我的證書", Object.keys(store("certs") || {}).length + " 張", () => go("certs")],
     ["🎆", "放煙火", fwTokens() + " 次", () => openFireworks()],
     ["⛰", "大武山拼圖", questDone().length + " / 9 片", () => go("puzzle")],
+    ["🛂", "動物護照", Object.keys(zooSeen()).length + " / " + ZOO.length + " 章", () => go("zoo")],
     ["🥚", "校寵扭蛋", capsules() + " 顆", () => go("gacha")],
     ["👜", "校寵蒐集袋", Object.keys(petBag().owned).length + " 種", () => go("pets")],
     ["🎟", "樂園門票", (typeof parkTickets === "function" ? parkTickets() : 0) + " 張", () => go("park")],
@@ -3104,6 +3111,7 @@ const HOST_FAQ = [
   { q: "今晚有流星雨嗎？", k: ["流星", "星星", "天文", "許願"], a: "", act: ["", "meteor"] },
   { q: "小火車怎麼搭？", k: ["火車", "小火車", "搭車", "車站", "坐車"], a: "環島小火車每天 06:00 到 22:00 繞著群島跑，停靠 8 個車站。點畫面上的「🚃 環島小火車」可以看即時動態，還能直接上車搭一圈！", act: ["看小火車即時動態", "train"] },
   { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。打開左下角的 🎒 背包，點「放煙火」，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
+  { q: "動物島在哪裡？", k: ["動物", "動物島", "動物園", "貓熊", "企鵝", "長頸鹿", "袋鼠", "護照", "保育"], a: "世界動物島在四年級島的外海，走步道橋就能到。島上分成極地、溫帶與高山森林、熱帶雨林、熱帶草原、沙漠與澳洲五個氣候區，有 14 種動物。點每一隻動物認識牠，就能蓋動物護照章，集滿送 2 顆校寵扭蛋！", act: ["去動物島", "zoo"] },
   { q: "大武山怎麼解鎖？", k: ["大武山", "拼圖", "解謎", "碎片", "秘密"], a: "大武山的入口被分成九片拼圖，藏在樂學島各個地方：卡丁車、藍鵲、證書、節慶、流星、小火車、樂園、魔法卡和校寵。集滿九片，大武山就會打開！", act: ["看拼圖進度", "puzzle"] },
   { q: "校寵怎麼拿？", k: ["校寵", "扭蛋", "寵物", "蒐集", "盲盒", "雲豹"], a: "嘉蘭國小校門內有一台校寵扭蛋機！每天第一次上島送 1 顆扭蛋，拿到證書、找到拼圖也會送。打開扭蛋就會隨機得到一隻可愛的校寵，收在蒐集袋裡。", act: ["去轉扭蛋", "gacha"] },
   { q: "卡丁車怎麼玩？", k: ["卡丁車", "賽車", "比賽", "拼圖", "碎片", "開車"], a: "飆速卡丁車島在一年級島旁邊，走彩虹賽道橋就能到。和三位電腦對手比 3 圈，用 ◀ ▶ 轉彎、甩尾可以加速，跑進前三名就能拿到神秘拼圖碎片！", act: ["去卡丁車島", "kart"] },
@@ -4845,7 +4853,7 @@ const PET_RAR = { N: ["普通", "#9AA3AD", 55], R: ["稀有", "#4AA8FF", 30], SR
 const petById = id => PETS.find(p => p.id === id) || (id === "king" ? PET_LEGEND : null);
 const petBag = () => store("pets") || { owned: {}, used: 0, order: [] };
 function visitDays() { const d = store("days") || []; const k = todayKey(); if (d.indexOf(k) < 0) { d.push(k); store("days", d.slice(-400)); } return d.length; }
-const capsules = () => { const b = petBag(); return Math.max(0, 1 + visitDays() + Object.keys(store("certs") || {}).length + questDone().length - (b.used || 0)); };
+const capsules = () => { const b = petBag(); return Math.max(0, 1 + visitDays() + Object.keys(store("certs") || {}).length + questDone().length + (zooDone() ? 2 : 0) - (b.used || 0)); };
 function rollPet() {
   let r = Math.random() * 100, rar = "N";
   for (const k of ["SSR", "SR", "R", "N"]) { if ((r -= PET_RAR[k][2]) <= 0 || k === "N") { rar = k; break; } }
@@ -5047,6 +5055,213 @@ function makeGachaMachine() {
   scene.add(g); const an = new THREE.Object3D(); an.position.set(1.4, 2.6, 8.1); scene.add(an);
   addLabel(an, 0, "npc", { type: "gachaLbl", name: "校寵扭蛋機" }, () => go("gacha"));
 }
+/* ===================== 衛星島：世界動物島（戶外教育站） ===================== */
+// 保育等級依 IUCN 紅皮書（國際自然保育聯盟），會隨新的調查更新
+const IUCN = { LC: ["無危", "#4E9F50"], NT: ["近危", "#9CBF3A"], VU: ["易危", "#E8B33A"], EN: ["瀕危", "#E07B1F"], CR: ["極危", "#C8423B"] };
+const ZOO_ZONES = [
+  { id: "polar", name: "極地區", icon: "🧊", ground: "#F2F6FA", desc: "寒帶：一年到頭都很冷，地上常常是冰和雪。" },
+  { id: "forest", name: "溫帶與高山森林區", icon: "🎋", ground: "#5E9B4E", desc: "溫帶與高山：四季分明，有竹林、針葉林和高山。" },
+  { id: "rain", name: "熱帶雨林區", icon: "🌴", ground: "#2E6B3A", desc: "熱帶雨林：全年高溫又多雨，樹木又高又密。" },
+  { id: "savanna", name: "熱帶草原區", icon: "🦒", ground: "#D9C26A", desc: "熱帶草原（莽原）：有乾季和雨季，大片草地上點綴著樹。" },
+  { id: "desert", name: "沙漠與澳洲區", icon: "🏜", ground: "#E3B77A", desc: "乾燥氣候：雨很少，白天熱、晚上冷；澳洲內陸也很乾。" }
+];
+const ZOO = [
+  { id: "polarbear", zone: "polar", name: "北極熊", en: "Polar bear", st: "VU", where: "北極圈：加拿大、格陵蘭、俄羅斯、挪威、美國阿拉斯加",
+    facts: ["白色的毛其實是透明中空的，皮膚是黑色的，可以吸收陽光保暖。", "牠們站在海冰上抓海豹，海冰變少，北極熊就很難找到食物。"], task: "想一想：全球暖化讓海冰融化，我們每天可以怎麼省電、減少浪費？" },
+  { id: "penguin", zone: "polar", name: "國王企鵝", en: "King penguin", st: "LC", where: "南極周圍的島嶼（亞南極），例如福克蘭群島、南喬治亞島",
+    facts: ["北極熊住在北極、企鵝住在南極，牠們在野外根本見不到面！", "爸爸媽媽輪流把蛋放在腳背上，用肚子下面的皮膚蓋著孵蛋。"], task: "觀察：企鵝走路和游泳的樣子有什麼不同？為什麼牠不會飛？" },
+  { id: "panda", zone: "forest", name: "大貓熊", en: "Giant panda", st: "VU", where: "中國四川、陝西、甘肅的高山竹林",
+    facts: ["一天要吃 12～38 公斤的竹子，幾乎一整天都在吃和睡。", "經過多年保育，野外數量增加，保育等級從「瀕危」改成「易危」。"], task: "想一想：保護動物的家（棲地），為什麼比把動物關起來更重要？" },
+  { id: "redpanda", zone: "forest", name: "小貓熊", en: "Red panda", st: "EN", where: "喜馬拉雅山區：尼泊爾、不丹、印度、緬甸、中國西南",
+    facts: ["雖然名字有「貓熊」，但牠和大貓熊不是近親，自己是一個獨立的科。", "毛茸茸的長尾巴有環紋，睡覺時可以捲起來當圍巾保暖。"], task: "觀察：小貓熊大部分時間在樹上還是地上？牠的腳掌有什麼特別？" },
+  { id: "snowleopard", zone: "forest", name: "雪豹", en: "Snow leopard", st: "VU", where: "亞洲中部高山：喜馬拉雅山、青藏高原、天山",
+    facts: ["粗粗的長尾巴可以幫忙平衡，也能蓋住鼻子取暖。", "牠住在海拔很高的岩石山區，很難被看見，被稱為「山中幽靈」。"], task: "比一比：雪豹和臺灣的雲豹，花紋有什麼不同？" },
+  { id: "blackbear", zone: "forest", name: "臺灣黑熊", en: "Formosan black bear", st: "VU", local: "臺灣第一級瀕臨絕種保育類", where: "臺灣中高海拔山區，大武山也有牠的足跡",
+    facts: ["胸前有白色或淡黃色的Ｖ字（像月亮），每隻的形狀都不一樣。", "牠是臺灣最大的陸地哺乳動物，排灣族也有許多和熊有關的故事。"], task: "上山時如果遇到黑熊，應該怎麼做？（保持距離、慢慢離開、不要餵食）" },
+  { id: "orangutan", zone: "rain", name: "婆羅洲紅毛猩猩", en: "Bornean orangutan", st: "CR", where: "東南亞婆羅洲的熱帶雨林",
+    facts: ["名字的意思是「森林裡的人」，牠們非常聰明，會用樹枝當工具。", "雨林被砍伐、改種油棕，讓紅毛猩猩失去了家。"], task: "觀察：猩猩的手臂和腳比起來，哪個比較長？為什麼？" },
+  { id: "tiger", zone: "rain", name: "老虎", en: "Tiger", st: "EN", where: "亞洲：印度、俄羅斯遠東、東南亞的森林與雨林",
+    facts: ["每隻老虎身上的條紋都不一樣，就像人的指紋。", "老虎很會游泳，喜歡泡在水裡消暑。"], task: "想一想：老虎是「頂級掠食者」，如果森林裡沒有老虎，會發生什麼事？" },
+  { id: "giraffe", zone: "savanna", name: "長頸鹿", en: "Giraffe", st: "VU", where: "非洲撒哈拉沙漠以南的熱帶草原",
+    facts: ["脖子雖然很長，但和人一樣只有 7 節頸椎！", "藍黑色的長舌頭大約有 45 公分，可以捲下金合歡樹的葉子。"], task: "觀察：長頸鹿低頭喝水時，前腳會怎麼擺？" },
+  { id: "elephant", zone: "savanna", name: "非洲草原象", en: "African savanna elephant", st: "EN", where: "非洲撒哈拉沙漠以南的草原與疏林",
+    facts: ["是世界上最大的陸地動物，大耳朵像扇子一樣幫忙散熱。", "象群由年紀最大的母象帶領，她記得哪裡有水和食物。"], task: "想一想：為什麼不能買象牙做的東西？" },
+  { id: "lion", zone: "savanna", name: "獅子", en: "Lion", st: "VU", where: "非洲撒哈拉沙漠以南；印度吉爾森林也有少數亞洲獅",
+    facts: ["獅子是唯一群居生活的大型貓科動物，一群叫做「獅群」。", "公獅的鬃毛越深色、越濃密，通常代表越健康強壯。"], task: "比一比：公獅和母獅長得哪裡不一樣？" },
+  { id: "fennec", zone: "desert", name: "耳廓狐", en: "Fennec fox", st: "LC", where: "北非撒哈拉沙漠",
+    facts: ["是體型最小的狐狸，大耳朵可以散熱，也能聽到沙子底下昆蟲的聲音。", "腳底長著毛，走在燙燙的沙子上也不怕。"], task: "想一想：住在沙漠的動物，怎麼面對白天很熱、晚上很冷？" },
+  { id: "kangaroo", zone: "desert", name: "紅袋鼠", en: "Red kangaroo", st: "LC", where: "澳洲內陸的乾燥草原與半沙漠",
+    facts: ["是最大的有袋類動物，寶寶出生時只有大約一顆花生那麼大，會爬進媽媽的育兒袋長大。", "粗壯的尾巴像第三隻腳，跳躍時可以保持平衡。"], task: "觀察：袋鼠怎麼移動？牠可以倒退走嗎？" },
+  { id: "koala", zone: "desert", name: "無尾熊", en: "Koala", st: "VU", where: "澳洲東部和東南部的尤加利樹林",
+    facts: ["幾乎只吃尤加利樹的葉子，因為營養很少，一天要睡 18～22 小時。", "牠不是熊，是有袋類動物，寶寶也住在媽媽的育兒袋裡。"], task: "想一想：森林大火對只吃一種植物的動物，影響特別大，為什麼？" }
+];
+const ZPOS = new V3(84, 0, -24), ZR = 13.5;
+const ZI = { anim: [], labels: [] };
+const zooSeen = () => (store("zoo") || {}).seen || {};
+const zooDone = () => Object.keys(zooSeen()).length >= ZOO.length;
+// 簡單的 Q 版動物模型
+function zAnimal(id) {
+  const g = new THREE.Group(), C = (c) => M(c);
+  const leg = (x, z, h, w, col) => g.add(part(cyl(w, w * 0.9, h, 8), C(col), x, h / 2, z));
+  const ear = (x, y, z, r, col) => g.add(part(sph(r, 8, 6), C(col), x, y, z));
+  const eye = (x, y, z) => g.add(part(sph(0.04, 6, 5), C("#111"), x, y, z));
+  let head = null;
+  const quad = (bw, bh, bl, legH, col, belly) => { const b = part(sph(1, 14, 10), C(col), 0, legH + bh * 0.5, 0); b.scale.set(bw, bh * 0.55, bl); g.add(b); [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => leg(sx * bw * 0.55, sz * bl * 0.55, legH + 0.05, bw * 0.22, belly || col)); };
+  const hd = (r, y, z, col) => { head = part(sph(r, 12, 10), C(col), 0, y, z); g.add(head); eye(-r * 0.4, y + r * 0.15, z + r * 0.85); eye(r * 0.4, y + r * 0.15, z + r * 0.85); return head; };
+  switch (id) {
+    case "polarbear": quad(0.55, 0.9, 0.85, 0.35, "#F4F1E8"); hd(0.36, 0.9, 0.85, "#F4F1E8"); ear(-0.22, 1.18, 0.82, 0.09, "#F4F1E8"); ear(0.22, 1.18, 0.82, 0.09, "#F4F1E8"); g.add(part(sph(0.07, 6, 5), C("#111"), 0, 0.86, 1.2)); break;
+    case "penguin": { const b = part(sph(0.4, 14, 10), C("#22252B"), 0, 0.55, 0); b.scale.set(1, 1.5, 0.9); g.add(b); const w = part(sph(0.33, 12, 8), C("#F7F4EA"), 0, 0.5, 0.12); w.scale.set(0.85, 1.4, 0.8); g.add(w);
+      hd(0.25, 1.15, 0.05, "#22252B"); [-1, 1].forEach(d => g.add(part(sph(0.08, 6, 5), C("#F2A33A"), d * 0.2, 1.1, 0.15))); g.add(part(cone(0.06, 0.25, 6), C("#E07B1F"), 0, 1.1, 0.35, Math.PI / 2, 0, 0)); g.add(part(sph(0.12, 8, 6), C("#F2C14E"), 0, 0.88, 0.28)); [-1, 1].forEach(d => g.add(part(box(0.08, 0.45, 0.2), C("#22252B"), d * 0.42, 0.62, 0, 0, 0, d * 0.25))); [-1, 1].forEach(d => g.add(part(box(0.14, 0.05, 0.2), C("#E07B1F"), d * 0.12, 0.03, 0.08))); break; }
+    case "panda": quad(0.55, 0.9, 0.7, 0.32, "#F4F1E8", "#1E1E1E"); g.add(part(sph(0.5, 10, 8), C("#1E1E1E"), 0, 0.78, 0.1)).scale.set(1.12, 0.35, 0.5); hd(0.38, 0.95, 0.72, "#F4F1E8"); ear(-0.27, 1.27, 0.68, 0.11, "#1E1E1E"); ear(0.27, 1.27, 0.68, 0.11, "#1E1E1E");
+      [-1, 1].forEach(d => { const p = part(sph(0.1, 8, 6), C("#1E1E1E"), d * 0.15, 1.0, 1.0); p.scale.set(1, 1.3, 0.6); g.add(p); }); g.add(part(cyl(0.02, 0.02, 0.9, 4), C("#7FA34A"), 0.25, 0.9, 1.05, 0.4, 0, 0.6)); break;
+    case "redpanda": quad(0.3, 0.45, 0.5, 0.18, "#C4541F", "#2A1A14"); hd(0.24, 0.55, 0.5, "#C4541F"); ear(-0.17, 0.75, 0.47, 0.07, "#F4F1E8"); ear(0.17, 0.75, 0.47, 0.07, "#F4F1E8"); g.add(part(sph(0.11, 8, 6), C("#F4F1E8"), 0, 0.5, 0.68));
+      for (let i = 0; i < 6; i++) g.add(part(cyl(0.11, 0.11, 0.12, 8), C(i % 2 ? "#E8C49A" : "#B5521F"), 0, 0.42 + i * 0.02, -0.55 - i * 0.12, Math.PI / 2 - 0.2, 0, 0)); break;
+    case "snowleopard": case "tiger": case "lion": { const col = id === "tiger" ? "#E07B1F" : id === "lion" ? "#D9A85A" : "#D7D3C9"; quad(0.36, 0.6, 0.85, 0.42, col); hd(0.3, 0.92, 0.82, col); ear(-0.2, 1.17, 0.78, 0.07, col); ear(0.2, 1.17, 0.78, 0.07, col); g.add(part(sph(0.12, 8, 6), C("#F4F1E8"), 0, 0.84, 1.05));
+      if (id === "lion") { const m = part(sph(0.46, 12, 10), C("#8A5A2A"), 0, 0.92, 0.66); m.scale.set(1, 1, 0.55); g.add(m); }
+      const tl = id === "snowleopard" ? 0.9 : 0.75; g.add(part(cyl(id === "snowleopard" ? 0.08 : 0.04, 0.05, tl, 6), C(col), 0, 0.75, -0.9 - tl / 3, -1.0, 0, 0));
+      if (id === "tiger") for (let i = 0; i < 5; i++) g.add(part(box(0.74, 0.05, 0.06), C("#1E1E1E"), 0, 0.98, -0.55 + i * 0.25)).scale.set(1, 1, 1);
+      if (id === "snowleopard") for (let i = 0; i < 10; i++) g.add(part(sph(0.05, 6, 5), C("#555"), Math.cos(i * 2.3) * 0.3, 0.9 + Math.sin(i) * 0.1, -0.6 + i * 0.13)); break; }
+    case "blackbear": quad(0.5, 0.85, 0.75, 0.32, "#1E1C1B"); hd(0.34, 0.92, 0.75, "#1E1C1B"); ear(-0.25, 1.2, 0.72, 0.1, "#1E1C1B"); ear(0.25, 1.2, 0.72, 0.1, "#1E1C1B"); g.add(part(sph(0.13, 8, 6), C("#B08A62"), 0, 0.86, 1.05));
+      g.add(part(box(0.3, 0.06, 0.04), C("#F4ECD0"), -0.12, 0.72, 0.95, 0, 0, -0.6)); g.add(part(box(0.3, 0.06, 0.04), C("#F4ECD0"), 0.12, 0.72, 0.95, 0, 0, 0.6)); break;
+    case "orangutan": { const b = part(sph(0.45, 12, 10), C("#B5521F"), 0, 0.55, 0); b.scale.set(1, 1.1, 0.85); g.add(b); hd(0.3, 1.12, 0.1, "#B5521F"); g.add(part(sph(0.2, 10, 8), C("#D9A07A"), 0, 1.07, 0.3));
+      [-1, 1].forEach(d => { g.add(part(cyl(0.09, 0.08, 1.0, 8), C("#B5521F"), d * 0.5, 0.5, 0.15, 0, 0, d * 0.35)); g.add(part(cyl(0.09, 0.09, 0.4, 8), C("#B5521F"), d * 0.25, 0.12, 0.3, Math.PI / 2, 0, 0)); }); break; }
+    case "giraffe": { quad(0.38, 0.7, 0.75, 1.2, "#E2B05A"); const n = part(cyl(0.12, 0.17, 1.6, 8), C("#E2B05A"), 0, 2.3, 0.62, 0.35, 0, 0); g.add(n); hd(0.22, 3.1, 0.92, "#E2B05A"); g.add(part(box(0.18, 0.16, 0.3), C("#E2B05A"), 0, 3.05, 1.15));
+      [-1, 1].forEach(d => { g.add(part(cyl(0.03, 0.03, 0.25, 5), C("#7A4E22"), d * 0.08, 3.38, 0.88)); g.add(part(sph(0.05, 6, 5), C("#7A4E22"), d * 0.08, 3.52, 0.88)); });
+      for (let i = 0; i < 14; i++) { const sp = part(box(0.14, 0.02, 0.14), C("#8A4E22"), Math.cos(i * 1.7) * 0.25, 1.62, -0.5 + (i % 7) * 0.17); sp.position.y = 1.55 + (i % 2) * 0.08; g.add(sp); } break; }
+    case "elephant": quad(0.75, 1.3, 1.05, 0.7, "#9A9690"); hd(0.5, 1.55, 1.0, "#9A9690"); [-1, 1].forEach(d => { const e = part(sph(0.42, 10, 8), C("#8C8882"), d * 0.5, 1.6, 0.85); e.scale.set(0.25, 1, 0.9); g.add(e); g.add(part(cone(0.05, 0.4, 6), C("#F4F0E6"), d * 0.2, 1.25, 1.35, 1.9, 0, 0)); });
+      g.add(part(cyl(0.12, 0.07, 0.9, 8), C("#9A9690"), 0, 1.05, 1.45, 0.2, 0, 0)); break;
+    case "fennec": quad(0.2, 0.32, 0.38, 0.2, "#EBC892"); hd(0.17, 0.48, 0.38, "#EBC892"); [-1, 1].forEach(d => { const e = part(cone(0.1, 0.32, 6), C("#EBC892"), d * 0.12, 0.72, 0.34); e.rotation.z = -d * 0.35; g.add(e); }); g.add(part(cyl(0.06, 0.03, 0.4, 6), C("#EBC892"), 0, 0.3, -0.48, -1.1, 0, 0)); break;
+    case "kangaroo": { const b = part(sph(0.35, 12, 10), C("#C46A3A"), 0, 0.75, 0); b.scale.set(1, 1.4, 0.95); g.add(b); hd(0.2, 1.38, 0.12, "#C46A3A"); g.add(part(box(0.14, 0.12, 0.2), C("#C46A3A"), 0, 1.33, 0.32));
+      [-1, 1].forEach(d => { g.add(part(cone(0.07, 0.25, 6), C("#C46A3A"), d * 0.1, 1.62, 0.08)); g.add(part(box(0.12, 0.08, 0.55), C("#A0532C"), d * 0.18, 0.04, 0.12)); g.add(part(cyl(0.04, 0.04, 0.3, 5), C("#C46A3A"), d * 0.18, 0.9, 0.28, 0.6, 0, 0)); });
+      g.add(part(cyl(0.12, 0.04, 1.0, 8), C("#C46A3A"), 0, 0.3, -0.55, -1.2, 0, 0)); g.add(part(sph(0.16, 8, 6), C("#E8B88A"), 0, 0.68, 0.3)); break; }
+    case "koala": { const tr = part(cyl(0.12, 0.15, 2.0, 8), C("#C9C2B2"), 0, 1.0, -0.25); g.add(tr); for (let i = 0; i < 5; i++) g.add(part(sph(0.35, 8, 6), C("#7FA36A"), Math.cos(i) * 0.4, 2.0 + (i % 2) * 0.2, -0.25 + Math.sin(i) * 0.4));
+      const b = part(sph(0.28, 12, 10), C("#9A9AA0"), 0, 1.0, 0); b.scale.set(1, 1.2, 0.9); g.add(b); hd(0.24, 1.42, 0.05, "#9A9AA0"); ear(-0.24, 1.58, 0.02, 0.13, "#B8B8BE"); ear(0.24, 1.58, 0.02, 0.13, "#B8B8BE"); g.add(part(sph(0.08, 6, 5), C("#2A2A2A"), 0, 1.38, 0.29)).scale.set(1, 1.3, 0.8); break; }
+  }
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g.userData.head = head; return g;
+}
+function acacia(s = 1) { const g = new THREE.Group(); g.add(part(cyl(0.07, 0.1, 1.6 * s, 6), M("#6E553F"), 0, 0.8 * s, 0, 0.1, 0, 0.1)); const c = part(cyl(0.9 * s, 1.0 * s, 0.25 * s, 10), M("#6B8F3A"), 0.1, 1.65 * s, 0.1); g.add(c); return g; }
+function bamboo(s = 1) { const g = new THREE.Group(); for (let i = 0; i < 5; i++) { const h = (1.4 + (i % 3) * 0.3) * s; g.add(part(cyl(0.04, 0.05, h, 5), M("#7FA34A"), Math.cos(i * 1.3) * 0.2, h / 2, Math.sin(i * 1.3) * 0.2, (i % 2 - 0.5) * 0.15, 0, 0)); g.add(part(cone(0.18, 0.4, 5), M("#5E8F3A"), Math.cos(i * 1.3) * 0.2, h, Math.sin(i * 1.3) * 0.2)); } return g; }
+function zPalm(s = 1) { const g = new THREE.Group(), h = 1.8 * s; g.add(part(cyl(0.06, 0.1, h, 6), M("#8A6A48"), 0, h / 2, 0)); for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2, l = part(box(0.9 * s, 0.03, 0.25 * s), M("#3E8A3A"), Math.cos(a) * 0.4 * s, h - 0.08, Math.sin(a) * 0.4 * s); l.rotation.set(0, -a, -0.35); g.add(l); } return g; }
+function makeZoo() {
+  const root = new THREE.Group();
+  floatingIsland(ZR, 2.6, root, 0, 0, { type: "zoo" });
+  // 五個氣候區（扇形地面）＋中央廣場
+  ZOO_ZONES.forEach((z, i) => {
+    const a0 = (i / 5) * Math.PI * 2 - Math.PI / 2 + 0.03, a1 = a0 + Math.PI * 2 / 5 - 0.06;
+    const sh = new THREE.Shape(), r0 = 3.3, r1 = ZR - 0.9;   // 直接用 (cos, -sin) 畫，轉到地面後就是 (cos, sin)
+    for (let k = 0; k <= 20; k++) { const a = a0 + (a1 - a0) * k / 20; k ? sh.lineTo(Math.cos(a) * r1, -Math.sin(a) * r1) : sh.moveTo(Math.cos(a) * r1, -Math.sin(a) * r1); }
+    for (let k = 20; k >= 0; k--) { const a = a0 + (a1 - a0) * k / 20; sh.lineTo(Math.cos(a) * r0, -Math.sin(a) * r0); }
+    const geo = new THREE.ShapeGeometry(sh); geo.rotateX(-Math.PI / 2);
+    root.add(part(geo, M(z.ground), 0, 0.025, 0));
+    z.mid = (a0 + a1) / 2; z.a0 = a0; z.a1 = a1;
+  });
+  const plaza = new THREE.Mesh(new THREE.CircleGeometry(3.2, 32), M("#E9D9B8")); plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.03; root.add(plaza);
+  // 區與區之間的步道
+  ZOO_ZONES.forEach(z => { const a = z.a0 - 0.03; root.add(part(box(0.7, 0.03, ZR - 4), M("#E2CDA6"), Math.cos(a) * (ZR / 2 + 1.2), 0.035, -Math.sin(a) * (ZR / 2 + 1.2) * -1, 0, -a + Math.PI / 2, 0)); });
+  // 中央：地球儀與入口招牌
+  root.add(part(cyl(0.5, 0.6, 0.6, 12), M("#B5322A"), 0, 0.3, 0)); root.add(part(sph(0.85, 18, 14), M("#2F7FC1"), 0, 1.5, 0));
+  [[0.3, 1.8, 0.65], [-0.4, 1.3, 0.62], [0.5, 1.2, -0.5], [-0.2, 2.0, -0.6]].forEach(([x, y, z]) => { const c = part(sph(0.32, 8, 6), M("#4E9F50"), x, y, z); c.scale.set(1, 0.6, 0.6); root.add(c); });
+  const sb = signBoard("世界動物島", "#3E7D4F", 2.6); sb.position.set(-2.4, 0, 2.2); sb.rotation.y = -0.6; root.add(sb);
+  // 每區的植物與地景
+  const at = (z, r, da) => { const a = z.mid + da; return [Math.cos(a) * r, Math.sin(a) * r]; };
+  ZOO_ZONES.forEach(z => {
+    for (let k = 0; k < 4; k++) {
+      const [x, zz] = at(z, 6 + (k % 2) * 4.2, (k - 1.5) * 0.22);
+      let obj;
+      if (z.id === "polar") { obj = new THREE.Group(); const ice = part(new THREE.DodecahedronGeometry(0.6 + (k % 2) * 0.3, 0), M("#DDEEFA"), 0, 0.3, 0); ice.scale.y = 0.6; obj.add(ice); }
+      else if (z.id === "forest") obj = k % 2 ? bamboo(1) : tree("pine", 1.1);
+      else if (z.id === "rain") obj = k % 2 ? zPalm(1.1) : tree("c", 1.3);
+      else if (z.id === "savanna") obj = acacia(k % 2 ? 1 : 0.8);
+      else { obj = new THREE.Group(); if (k % 2) { const d = part(sph(0.9, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), M("#D9A86A"), 0, 0, 0); d.scale.set(1.4, 0.4, 1); obj.add(d); } else obj.add(tree("a", 1.0)); }
+      obj.position.set(x, 0, zz); root.add(obj);
+    }
+    if (z.id === "polar") { const pool = new THREE.Mesh(new THREE.CircleGeometry(1.4, 20), M("#7FC4E8")); pool.rotation.x = -Math.PI / 2; const [x, zz] = at(z, 8.5, 0.15); pool.position.set(x, 0.04, zz); root.add(pool); }
+    if (z.id === "savanna") { const pond = new THREE.Mesh(new THREE.CircleGeometry(1.1, 18), M("#6FB2D8")); pond.rotation.x = -Math.PI / 2; const [x, zz] = at(z, 9.8, -0.1); pond.position.set(x, 0.04, zz); root.add(pond); }
+    // 區域招牌
+    const [x, zz] = at(z, 4.0, 0); const sign = signBoard(z.name.replace("區", ""), "#3E7D4F", 1.9); sign.scale.setScalar(0.6); sign.position.set(x, 0, zz); sign.rotation.y = Math.atan2(x, zz); root.add(sign);
+    // 圍欄
+    for (let k = 0; k < 7; k++) { const a = z.a0 + 0.06 + k * ((z.a1 - z.a0 - 0.12) / 6), r = 3.6; root.add(part(box(0.06, 0.4, 0.06), M("#8A6A48"), Math.cos(a) * r, 0.2, Math.sin(a) * r)); }
+  });
+  mergeStatic(root); root.position.copy(ZPOS); scene.add(root);
+  // 動物
+  const dyn = new THREE.Group(); dyn.position.copy(ZPOS); scene.add(dyn); ZI.dyn = dyn;
+  ZOO_ZONES.forEach(z => {
+    const list = ZOO.filter(a => a.zone === z.id);
+    list.forEach((a, k) => {
+      const da = (k - (list.length - 1) / 2) * 0.32, r = 7.6 + (k % 2) * 1.6, ang = z.mid + da, x = Math.cos(ang) * r, zz = Math.sin(ang) * r;
+      const m = zAnimal(a.id); m.position.set(x, 0.03, zz); m.rotation.y = Math.atan2(-x, -zz) + (Math.random() - 0.5) * 0.8; dyn.add(m);
+      const hit = new THREE.Mesh(box(1.8, 2.4, 1.8), new THREE.MeshBasicMaterial({ visible: false })); hit.position.set(x, 1.1, zz); hit.userData = { pick: true, type: "animal", id: a.id }; dyn.add(hit); pickables.push(hit);
+      const an = new THREE.Object3D(); an.position.set(x, a.id === "giraffe" ? 4.0 : a.id === "elephant" || a.id === "koala" ? 2.9 : 2.0, zz); dyn.add(an);
+      ZI.labels.push(addLabel(an, 0, "animal", { a }, () => openAnimal(a.id)));
+      ZI.anim.push({ m, base: m.rotation.y, ph: Math.random() * 6, a });
+    });
+  });
+  // 彩色步道橋：四年級島 → 動物島
+  const g4 = ANG[3] * Math.PI / 180, gp = new V3(Math.cos(g4) * D, 0, Math.sin(g4) * D), th0 = Math.atan2(-gp.x, -gp.z);
+  let best = null;
+  for (let k = 0; k < SUBJECTS.length; k++) { const th = th0 + (36 + k * 32) * Math.PI / 180, p = gp.clone().add(new V3(Math.sin(th) * RI, 0, Math.cos(th) * RI)); const d = p.distanceTo(ZPOS); if (!best || d < best.d) best = { p, d }; }
+  const dir = ZPOS.clone().sub(best.p).normalize(), A = best.p.clone().addScaledVector(dir, RS - 0.3), B = ZPOS.clone().addScaledVector(dir, -(ZR - 0.3));
+  const br = new THREE.Group(), L = A.distanceTo(B), N = Math.round(L / 0.9), yaw = Math.atan2(dir.x, dir.z), side = new V3(dir.z, 0, -dir.x);
+  const yAt = t => Math.sin(Math.PI * t) * 6.5;
+  for (let i = 0; i < N; i++) {
+    const t0 = i / N, t1 = (i + 1) / N, p0 = A.clone().lerp(B, t0), p1 = A.clone().lerp(B, t1), y0 = yAt(t0), y1 = yAt(t1), mid = p0.clone().add(p1).multiplyScalar(0.5);
+    const seg = part(box(1.6, 0.16, L / N * 1.02), M("#C9A577"), mid.x, (y0 + y1) / 2, mid.z); seg.rotation.set(-Math.atan2(y1 - y0, L / N), yaw, 0, "YXZ"); br.add(seg);
+    [-1, 1].forEach(sg => { const o = side.clone().multiplyScalar(sg * 0.82), rl = part(box(0.08, 0.25, L / N * 1.02), M("#3E7D4F"), mid.x + o.x, (y0 + y1) / 2 + 0.2, mid.z + o.z); rl.rotation.copy(seg.rotation); br.add(rl); });
+    if (i % 6 === 3 && y0 > 1.5) br.add(part(cyl(0.18, 0.24, y0 - SEA_Y, 8), M("#D8D2C4"), mid.x, (y0 + SEA_Y) / 2, mid.z));
+  }
+  mergeStatic(br); scene.add(br);
+  const an = new THREE.Object3D(); an.position.copy(ZPOS).add(new V3(0, 5.6, 0)); scene.add(an);
+  addLabel(an, 0, "plain", { name: "🦒 世界動物島" }, () => go("zoo"));
+}
+function stepZoo(dt, time) {
+  if (focus.g !== 11 || ui.paused) return;
+  ZI.anim.forEach(o => { o.m.rotation.y = o.base + Math.sin(time * 0.5 + o.ph) * 0.35; const h = o.m.userData.head; if (h) h.position.y += Math.sin(time * 2 + o.ph) * 0.0015; });
+}
+function zooPose() { const t = ZPOS.clone().add(new V3(0, 1, 0)), p = ZPOS.clone().add(new V3(12, isMobile() ? 44 : 30, isMobile() ? 46 : 32)); shiftForPanel(t, p); return { target: t, pos: p }; }
+function iucnTag(st) { const r = IUCN[st]; return '<span class="iucn" style="--ic:' + r[1] + '">' + st + '．' + r[0] + '</span>'; }
+function panelZoo(quiet) {
+  const seen = zooSeen(), n = Object.keys(seen).length;
+  openPanel('<div class="p-top"><span class="crumb">嘉蘭樂學島．衛星島</span><button class="p-close" aria-label="關閉">×</button></div>' +
+    '<h2 style="--c:#3E7D4F"><i class="dot"></i>🦒 世界動物島</h2><p class="p-lede">從四年級島走步道橋就能到。島上分成五個氣候區，住著世界各地的特有種、瀕臨絕種動物和大家喜歡的明星動物。點動物，認識牠們、蓋上護照章！</p>' +
+    '<div class="ticket-line zoo-pass"><span>🛂 動物護照：<b>' + n + ' / ' + ZOO.length + '</b> 個章</span><small>' + (n >= ZOO.length ? "全部集滿！已經得到 2 顆校寵扭蛋的獎勵。" : "集滿全部的章，可以得到 2 顆校寵扭蛋！") + '</small></div>' +
+    ZOO_ZONES.map(z => '<h3>' + z.icon + ' ' + z.name + '</h3><p class="small" style="margin:0 0 6px">' + z.desc + '</p><div class="tr-rows">' + ZOO.filter(a => a.zone === z.id).map(a => '<button class="tr-row zoo-row" data-animal="' + a.id + '"><i style="background:' + IUCN[a.st][1] + '"></i><b>' + (seen[a.id] ? "✅ " : "") + esc(a.name) + '</b>' + iucnTag(a.st) + '</button>').join("") + '</div>').join("") +
+    '<div class="row" style="margin-top:14px"><button class="btn ghost" id="zooPrint">🖨 列印戶外教育學習單</button></div>' +
+    '<p class="small">保育等級依 IUCN 紅皮書（國際自然保育聯盟）。調查結果會更新，等級也可能改變。</p>', "subject");
+  $all("[data-animal]").forEach(b => b.addEventListener("click", () => openAnimal(b.getAttribute("data-animal"))));
+  $("#zooPrint").addEventListener("click", printZooSheet);
+  if (!quiet) speak("世界動物島。");
+}
+function openAnimal(id) {
+  const a = ZOO.find(x => x.id === id); if (!a) return;
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  const z = ZOO_ZONES.find(x => x.id === a.zone), z0 = store("zoo") || { seen: {} }, first = !z0.seen[id];
+  if (first) { z0.seen[id] = todayKey(); store("zoo", z0); updateCertCount(); refreshLabels(); }
+  const done = zooDone();
+  openModal('<div class="npc-card animal-card" style="--s:' + IUCN[a.st][1] + '"><button class="m-close" aria-label="關閉">×</button>' +
+    '<div class="npc-head"><div class="npc-ava zoo">' + z.icon + '</div><div><small>' + esc(z.name) + '．' + esc(a.en) + '</small><h2>' + esc(a.name) + '</h2><p class="npc-why">' + iucnTag(a.st) + (a.local ? ' <span class="iucn" style="--ic:#B5322A">' + esc(a.local) + '</span>' : "") + '</p></div></div>' +
+    '<dl class="kv"><dt>住在哪裡</dt><dd>' + esc(a.where) + '</dd></dl>' +
+    '<h3>🔍 你知道嗎？</h3><ul class="goal-list">' + a.facts.map(f => '<li>' + esc(f) + '</li>').join("") + '</ul>' +
+    '<h3>🧭 戶外教育任務</h3><p class="npc-tip">' + esc(a.task) + '</p>' +
+    (first ? '<div class="stamp-in">🛂 蓋上護照章！<b>' + Object.keys(z0.seen).length + ' / ' + ZOO.length + '</b></div>' : "") +
+    '<div class="row npc-act"><button class="say" id="aniSay">' + ICON_SPEAK + '聽一聽</button></div></div>', "npc-sheet");
+  $("#aniSay").addEventListener("click", () => speak(a.name + "，" + IUCN[a.st][0] + "。住在" + a.where + "。" + a.facts.join("") + a.task, { force: true }));
+  if (first) { playChime(); if (done) setTimeout(() => { playCheer(false); confetti(); toast("🛂 動物護照全部集滿！獲得 2 顆校寵扭蛋！"); }, 900); }
+  speak(a.name + "。" + a.facts[0]);
+  if (focus.g === 11) panelZoo(true);
+}
+function printZooSheet() {
+  let pa = $("#printArea"); if (!pa) { pa = document.createElement("div"); pa.id = "printArea"; document.body.appendChild(pa); }
+  pa.innerHTML = '<div class="ws"><h1>嘉蘭樂學島．世界動物島　戶外教育學習單</h1><p>班級：＿＿＿＿　座號：＿＿＿　姓名：＿＿＿＿＿＿＿＿　日期：＿＿＿＿＿＿</p>' +
+    '<table><thead><tr><th>動物</th><th>氣候區</th><th>保育等級</th><th>我觀察到的特徵</th></tr></thead><tbody>' +
+    ZOO.map(a => '<tr><td>' + esc(a.name) + '</td><td>' + esc(ZOO_ZONES.find(z => z.id === a.zone).name.replace("區", "")) + '</td><td></td><td></td></tr>').join("") + '</tbody></table>' +
+    '<h2>想一想</h2><ol><li>北極熊和國王企鵝在野外為什麼見不到面？</li><li>選一種「瀕危」或「極危」的動物，寫出牠變少的原因。</li><li>臺灣黑熊住在哪裡？如果在山上遇到牠，應該怎麼做？</li><li>我可以為保護動物做哪一件事？</li></ol>' +
+    '<p class="ws-note">保育等級依 IUCN 紅皮書：無危 LC、近危 NT、易危 VU、瀕危 EN、極危 CR。</p></div>';
+  document.body.classList.add("printing");
+  const done = () => { document.body.classList.remove("printing"); removeEventListener("afterprint", done); };
+  addEventListener("afterprint", done); setTimeout(() => window.print(), 150);
+}
+
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -5105,6 +5320,7 @@ function refreshOpenState() {
     else if (focus.g === 8) panelTrain(true);
     else if (focus.g === 9) panelPark(true);
     else if (focus.g === 10) panelKart(true);
+    else if (focus.g === 11) panelZoo(true);
     else if (focus.g) panelIsland(focus.g);
     else if (focus.g === null) panelHome();
   }
@@ -5229,7 +5445,8 @@ function route() {
   if (h === "pets") { openPets(); return; }
   if (h === "puzzle") { openPuzzle(); return; }
   if (h === "cards") { openCardBook(); return; }
-  if (h === "kart") { if (panelMin()) setPanelMin(false, false); focus.g = 10; focus.key = null; panelKart(); fly("kart", kartPose); }
+  if (h === "zoo") { if (panelMin()) setPanelMin(false, false); focus.g = 11; focus.key = null; panelZoo(); fly("zoo", zooPose); }
+  else if (h === "kart") { if (panelMin()) setPanelMin(false, false); focus.g = 10; focus.key = null; panelKart(); fly("kart", kartPose); }
   else if (h === "park") { if (panelMin()) setPanelMin(false, false); focus.g = 9; focus.key = null; panelPark(); fly("park", parkPose); }
   else
   if (h === "train") { if (panelMin()) setPanelMin(false, false); focus.g = 8; focus.key = null; panelTrain(); fly("train", trainViewPose); }

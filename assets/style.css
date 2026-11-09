@@ -870,3 +870,18 @@ pre.code { background: #1F2A28; color: #E9F2E6; padding: 10px 12px; border-radiu
 .pz-item b { display: block; font-size: .95rem; } .pz-item small { color: var(--ink-soft); line-height: 1.5; display: block; }
 @media (max-width: 760px) { .pz-wrap { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .g-dome.shake i, .cap, .pet-reveal .rays { animation: none; } }
+
+/* ---------- 世界動物島 ---------- */
+.iucn { display: inline-block; font-size: .78rem; font-weight: 700; color: #fff; background: var(--ic); padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.zoo-row { grid-template-columns: 12px 1fr auto; }
+.npc-ava.zoo { background: #EAF3E6; font-size: 2rem; box-shadow: inset 0 0 0 3px var(--s), 0 6px 16px rgba(0,0,0,.12); }
+.animal-card .kv { margin: 6px 0; }
+.stamp-in { margin: 12px auto 0; width: fit-content; padding: 8px 16px; border: 3px dashed #3E7D4F; color: #3E7D4F; border-radius: 12px; font-weight: 800; transform: rotate(-4deg); animation: stampIn .5s cubic-bezier(.2,1.6,.4,1); }
+.ws { font-family: "Noto Sans TC", sans-serif; color: #000; padding: 10mm; }
+.ws h1 { font-size: 18pt; margin: 0 0 6pt; } .ws h2 { font-size: 14pt; margin: 12pt 0 4pt; }
+.ws table { width: 100%; border-collapse: collapse; font-size: 11pt; }
+.ws th, .ws td { border: 1px solid #333; padding: 6pt; text-align: left; }
+.ws td:nth-child(3) { width: 18%; } .ws td:nth-child(4) { width: 42%; }
+.ws ol li { margin: 0 0 14pt; }
+.ws-note { font-size: 9pt; color: #555; }
+@media print { body.printing #printArea .ws { display: block; } }
