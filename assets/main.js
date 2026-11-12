@@ -1922,6 +1922,7 @@ function labelMode(L) {
   if (L.kind === "npc") return (L.data.type === "host" ? focus.g === 0 : (focus.g === L.data.g && !FEST.npc)) ? "fixed" : "hide";
   if (L.kind === "fest") return (focus.g === 0 || focus.g === null) ? "fixed" : "hide";
   if (L.kind === "animal") return focus.g === 11 ? "fixed" : "hide";
+  if (L.kind === "drone") return focus.g === 12 ? "fixed" : "hide";
   if (L.kind === "park") return focus.g === 9 && !PARK.ride && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "ferry") return (focus.g === 9 || focus.g === 7 || focus.g === null) && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "station") return focus.g === 8 && !RIDE.on ? "fixed" : "hide";
@@ -1953,6 +1954,9 @@ function renderLabel(L, mode) {
     if (s) L.el.style.setProperty("--s", s.color);
     L.el.setAttribute("aria-label", host ? "島主" + d.name + "，點我問問題" : d.name + "，" + GRADES[d.g - 1].name + s.name + "助教");
     L.el.innerHTML = host ? '<i>主</i><span>島主．' + esc(d.name) + '</span>' : '<i>' + esc(s.name[0]) + '</i><span>' + esc(d.name) + '</span>';
+  } else if (L.kind === "drone") {
+    const dd = d.d; L.el.className = "lbl npc station"; L.el.style.setProperty("--s", dd.cat === "軍用" ? "#4E5A68" : "#2F7FD8");
+    L.el.innerHTML = '<i>' + (dd.cat === "軍用" ? "🛡" : dd.fly === "wing" ? "✈️" : "🛸") + '</i><span>' + esc(dd.name) + '</span>';
   } else if (L.kind === "animal") {
     const a = d.a, seen = zooSeen()[a.id]; L.el.className = "lbl npc station"; L.el.style.setProperty("--s", IUCN[a.st][1]);
     L.el.innerHTML = '<i>' + (seen ? "✅" : "🐾") + '</i><span>' + esc(a.name) + '</span>';
@@ -1984,10 +1988,10 @@ function renderLabel(L, mode) {
 const _v = new V3();
 function updateLabels() {
   const W = innerWidth, H = innerHeight;
-  if (FW.active || PARK.ride || PARK.boarded) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
+  if (FW.active || PARK.ride || PARK.boarded || DR.fly) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
   labels.forEach(L => {
     const m = labelMode(L); if (m !== L.mode) renderLabel(L, m);
-    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry", "animal"].includes(L.kind)) && L.mode !== "hide";
+    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry", "animal", "drone"].includes(L.kind)) && L.mode !== "hide";
     if (L.kind === "grade" && L.data.g && focus.g === L.data.g && focus.key) show = false;
     if (!show) { L.el.style.visibility = "hidden"; return; }
     L.obj.getWorldPosition(_v); _v.y += L.offY; _v.project(camera);
@@ -2021,7 +2025,7 @@ function pickAt(cx, cy) {
   ray.setFromCamera(ptr, camera);
   const hits = ray.intersectObjects(pickables, false);
   if (!hits.length) return null;
-  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "animal", "bird", "mascot", "building"];
+  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "animal", "drone", "bird", "mascot", "building"];
   for (const t of pri) { const h = hits.find(x => x.object.userData.type === t); if (h) return h.object.userData; }
   return hits[0].object.userData;
 }
@@ -2038,6 +2042,8 @@ function onPick(u) {
   if (u.type === "gacha") return go("gacha");
   if (u.type === "animal") return openAnimal(u.id);
   if (u.type === "zoo") return go("zoo");
+  if (u.type === "drone") return openDrone(u.id);
+  if (u.type === "droneIsle") return go("drone");
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2079,7 +2085,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine(); makeZoo();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine(); makeZoo(); makeDroneIsland();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2093,7 +2099,7 @@ function initWorld() {
   renderer.setAnimationLoop(() => {
     if (KG.on) { last = performance.now(); return; }   // 玩卡丁車時暫停 3D 畫面，省電又順暢
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now; time += ui.paused ? 0 : dt;
-    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt); stepZoo(dt, time);
+    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded && !DR.fly) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt); stepZoo(dt, time); stepDroneIsland(dt, time);
     scene.children.forEach(o => { if (o.userData.follow) o.position.copy(camera.position); });
     if (sunMesh.userData.dir) sunMesh.position.copy(camera.position).addScaledVector(sunMesh.userData.dir, 600);
     if (moonSprite.userData.dir) moonSprite.position.copy(camera.position).addScaledVector(moonSprite.userData.dir, 580);
@@ -2604,6 +2610,7 @@ function bagItems() {
     ["🎆", "放煙火", fwTokens() + " 次", () => openFireworks()],
     ["⛰", "大武山拼圖", questDone().length + " / 9 片", () => go("puzzle")],
     ["🛂", "動物護照", Object.keys(zooSeen()).length + " / " + ZOO.length + " 章", () => go("zoo")],
+    ["🪪", "無人機飛行員證", droneLic() ? "已取得" : "未取得", () => droneLic() ? openDroneLicense() : go("drone")],
     ["🥚", "校寵扭蛋", capsules() + " 顆", () => go("gacha")],
     ["👜", "校寵蒐集袋", Object.keys(petBag().owned).length + " 種", () => go("pets")],
     ["🎟", "樂園門票", (typeof parkTickets === "function" ? parkTickets() : 0) + " 張", () => go("park")],
@@ -3111,6 +3118,7 @@ const HOST_FAQ = [
   { q: "今晚有流星雨嗎？", k: ["流星", "星星", "天文", "許願"], a: "", act: ["", "meteor"] },
   { q: "小火車怎麼搭？", k: ["火車", "小火車", "搭車", "車站", "坐車"], a: "環島小火車每天 06:00 到 22:00 繞著群島跑，停靠 8 個車站。點畫面上的「🚃 環島小火車」可以看即時動態，還能直接上車搭一圈！", act: ["看小火車即時動態", "train"] },
   { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。打開左下角的 🎒 背包，點「放煙火」，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
+  { q: "無人機島在哪裡？", k: ["無人機", "空拍", "飛機", "空拍機", "飛行", "執照", "燈光秀", "程式飛行"], a: "無人機島在二年級島的外海，走藍色步道橋就能到。機庫裡有八款無人機：空拍機、穿越機、植保機、物流機、垂直起降固定翼，還有軍用的長航時偵察機和隱形飛翼機。可以坐上駕駛座試飛、挑戰光環、寫程式讓無人機飛正方形；考過法規小教室又完成光環挑戰，就能拿到飛行員證和 1 顆校寵扭蛋！晚上還有無人機燈光秀喔。", act: ["去無人機島", "drone"] },
   { q: "動物島在哪裡？", k: ["動物", "動物島", "動物園", "貓熊", "企鵝", "長頸鹿", "袋鼠", "護照", "保育"], a: "世界動物島在四年級島的外海，走步道橋就能到。島上分成極地、溫帶與高山森林、熱帶雨林、熱帶草原、沙漠與澳洲五個氣候區，有 14 種動物。點每一隻動物認識牠，就能蓋動物護照章，集滿送 2 顆校寵扭蛋！", act: ["去動物島", "zoo"] },
   { q: "大武山怎麼解鎖？", k: ["大武山", "拼圖", "解謎", "碎片", "秘密"], a: "大武山的入口被分成九片拼圖，藏在樂學島各個地方：卡丁車、藍鵲、證書、節慶、流星、小火車、樂園、魔法卡和校寵。集滿九片，大武山就會打開！", act: ["看拼圖進度", "puzzle"] },
   { q: "校寵怎麼拿？", k: ["校寵", "扭蛋", "寵物", "蒐集", "盲盒", "雲豹"], a: "嘉蘭國小校門內有一台校寵扭蛋機！每天第一次上島送 1 顆扭蛋，拿到證書、找到拼圖也會送。打開扭蛋就會隨機得到一隻可愛的校寵，收在蒐集袋裡。", act: ["去轉扭蛋", "gacha"] },
@@ -4853,7 +4861,7 @@ const PET_RAR = { N: ["普通", "#9AA3AD", 55], R: ["稀有", "#4AA8FF", 30], SR
 const petById = id => PETS.find(p => p.id === id) || (id === "king" ? PET_LEGEND : null);
 const petBag = () => store("pets") || { owned: {}, used: 0, order: [] };
 function visitDays() { const d = store("days") || []; const k = todayKey(); if (d.indexOf(k) < 0) { d.push(k); store("days", d.slice(-400)); } return d.length; }
-const capsules = () => { const b = petBag(); return Math.max(0, 1 + visitDays() + Object.keys(store("certs") || {}).length + questDone().length + (zooDone() ? 2 : 0) - (b.used || 0)); };
+const capsules = () => { const b = petBag(); return Math.max(0, 1 + visitDays() + Object.keys(store("certs") || {}).length + questDone().length + (zooDone() ? 2 : 0) + (droneLic() ? 1 : 0) - (b.used || 0)); };
 function rollPet() {
   let r = Math.random() * 100, rar = "N";
   for (const k of ["SSR", "SR", "R", "N"]) { if ((r -= PET_RAR[k][2]) <= 0 || k === "N") { rar = k; break; } }
@@ -5262,6 +5270,707 @@ function printZooSheet() {
   addEventListener("afterprint", done); setTimeout(() => window.print(), 150);
 }
 
+/* =====================================================================
+   🛸 無人機島（衛星島）：展示機庫＋飛行模擬＋光環挑戰＋法規小教室＋程式飛行＋燈光秀
+   ===================================================================== */
+const DPOS = new V3(-70, 0, -50), DRR = 12;
+const DRONES = [
+  { id: "aerial", name: "空拍四軸機", en: "Camera Quadcopter", cat: "民用", type: "多旋翼", fly: "multi", col: "#F2F4F7", acc: "#E0752D", at: [-6.4, 2.6], ry: 0.5,
+    spec: [["大小", "對角約 35 公分"], ["重量", "約 250–900 公克"], ["續航", "約 25–45 分鐘"], ["最高速度", "約 60 公里／小時"]],
+    use: "空中攝影、地形測量、橋梁與電塔巡檢、山區搜救。",
+    how: "四個螺旋槳兩個順時針、兩個逆時針轉，互相抵消反扭力。飛控電腦每秒調整幾百次馬達轉速：前面兩顆轉慢、後面兩顆轉快，機身就往前傾、往前飛。",
+    facts: ["鏡頭掛在「三軸雲台」上，機身怎麼晃，畫面都很穩。", "靠 GPS 衛星和向下看的鏡頭定位，放開搖桿就能停在空中（懸停）。", "很多機型有避障雷達，看到樹或牆會自己煞車。"],
+    phys: { vmax: 9, climb: 4, yaw: 1.8, tilt: 0.32, acc: 2.6, bat: 260 } },
+  { id: "fpv", name: "FPV 穿越機", en: "FPV Racing Drone", cat: "民用", type: "多旋翼．競速", fly: "multi", col: "#2B2F36", acc: "#FF5A3C", at: [-2.4, 2.6], ry: 0.2,
+    spec: [["大小", "對角約 20–25 公分"], ["重量", "約 300–700 公克"], ["續航", "約 3–6 分鐘"], ["最高速度", "超過 150 公里／小時"]],
+    use: "無人機競速比賽、跟拍運動和賽車、拍攝穿越建築的特技畫面。",
+    how: "飛手戴上 FPV（第一人稱視角）眼鏡，看機上鏡頭傳回的即時畫面飛行。馬達大、機身輕，推重比很高，所以加速超快。",
+    facts: ["真正的穿越機多半沒有自動定高，全靠手指控制，需要先在模擬器練習很久。", "國際上有無人機競速聯賽，選手要在 LED 光門之間高速穿梭。", "在這座島上，我們幫你打開了「輔助平衡」，比較容易上手。"],
+    phys: { vmax: 21, climb: 8, yaw: 3.0, tilt: 0.62, acc: 4.2, bat: 140 } },
+  { id: "agri", name: "農業植保六軸機", en: "Agricultural Hexacopter", cat: "民用", type: "多旋翼．六軸", fly: "multi", col: "#F7F8F5", acc: "#2E9E5B", at: [2.0, 2.8], ry: -0.3,
+    spec: [["大小", "展開約 2–2.5 公尺"], ["重量", "空機約 20–30 公斤"], ["藥桶", "約 10–40 公升"], ["續航", "滿載約 10–15 分鐘"]],
+    use: "噴灑農藥、施肥、播種，也能幫果園、稻田做空中巡田。",
+    how: "六個旋翼提供更大的升力，可以載重藥桶。機身下方的噴桿配合螺旋槳往下吹的風，把藥液壓到作物葉子上，噴得又快又均勻。",
+    facts: ["六軸或八軸的好處是「備援」：壞掉一顆馬達，還有機會安全降落。", "臺灣很多農民已經用植保機噴藥，人不用走進田裡吸到農藥。", "噴藥航線可以事先在平板上畫好，飛機自己沿著航線飛。"],
+    phys: { vmax: 6, climb: 2.6, yaw: 1.2, tilt: 0.22, acc: 1.6, bat: 200 } },
+  { id: "deliver", name: "物流配送無人機", en: "Delivery Drone", cat: "民用", type: "多旋翼．物流", fly: "multi", col: "#FFFFFF", acc: "#2F7FD8", at: [6.4, 2.4], ry: -0.6,
+    spec: [["載重", "約 1–5 公斤"], ["航程", "約 10–20 公里"], ["投遞方式", "降落或用纜繩垂降包裹"], ["速度", "約 50–100 公里／小時"]],
+    use: "把藥品、血液、急用物資送到山區、離島或交通不便的地方。",
+    how: "流線型機身包住貨艙，減少風阻。到了目的地不一定要降落，可以停在空中，用纜繩把包裹慢慢放到地上，對地面的人比較安全。",
+    facts: ["有些國家用無人機把血液送到偏遠診所，從幾小時縮短成幾十分鐘。", "臺灣也試辦過用無人機運送物資到離島和山區部落。", "配送路線要避開人多的地方，還要隨時注意天氣和風速。"],
+    phys: { vmax: 10, climb: 3.4, yaw: 1.5, tilt: 0.28, acc: 2.2, bat: 300 } },
+  { id: "vtol", name: "垂直起降固定翼", en: "VTOL Fixed-wing", cat: "民用", type: "複合翼．VTOL", fly: "wing", col: "#F5F6F8", acc: "#14A3A3", at: [-6.2, -8.2], ry: Math.PI / 2,
+    spec: [["翼展", "約 2–3.5 公尺"], ["重量", "約 10–20 公斤"], ["續航", "約 1–3 小時"], ["巡航速度", "約 70–100 公里／小時"]],
+    use: "大面積地圖測繪、海岸線與森林巡查、災後勘查。",
+    how: "起飛時像直升機，用四個向上的旋翼垂直升空；到了空中改用尾巴的推進螺旋槳往前飛，讓機翼產生升力。不用跑道，又飛得比四軸機遠。",
+    facts: ["機翼的上表面比較彎，空氣流過時上面壓力變小，就產生「升力」。", "固定翼飛機不能停在空中，一定要保持速度才不會「失速」。", "一架 VTOL 一次可以拍下好幾平方公里的照片，拼成精細地圖。"],
+    phys: { vmin: 6, vmax: 16, turn: 1.1, bat: 520 } },
+  { id: "male", name: "長航時偵察無人機", en: "MALE Reconnaissance UAV", cat: "軍用", type: "固定翼．MALE", fly: "wing", col: "#A7B0BA", acc: "#5D6875", at: [0.6, -8.6], ry: Math.PI / 2,
+    spec: [["翼展", "約 15–20 公尺"], ["重量", "約 3–5 公噸"], ["續航", "約 20–30 小時以上"], ["飛行高度", "中高空，約 7,000–15,000 公尺"]],
+    use: "長時間偵察、監視與海上巡邏；同樣的技術也用於森林火災監測、颱風災情勘查和海難搜救。",
+    how: "MALE 是「中高度、長航時」的意思。又長又細的機翼像滑翔機一樣省力，機頭隆起的地方裝著衛星天線，地面站的飛行員透過衛星遠端操控。",
+    facts: ["臺灣中科院研發的「騰雲」就是這一類的長航時無人機。", "美國的 MQ-9「死神」也是這一型，常被用來比較。", "軍用無人機的使用，引起很多國際法和倫理上的討論，值得一起想一想。"],
+    phys: { vmin: 7, vmax: 14, turn: 0.75, bat: 900 } },
+  { id: "wing", name: "隱形飛翼無人機", en: "Stealth Flying-wing UCAV", cat: "軍用", type: "飛翼．噴射", fly: "wing", col: "#454B55", acc: "#262A31", at: [6.0, -7.4], ry: Math.PI / 2,
+    spec: [["翼展", "約 12–19 公尺"], ["動力", "噴射引擎"], ["速度", "高次音速，約 900 公里／小時"], ["特色", "沒有尾翼的飛翼外形"]],
+    use: "多半是軍事研究用的技術驗證機，測試匿蹤、自動起降和空中加油。",
+    how: "整架飛機就是一片大機翼，沒有垂直尾翼，邊緣角度經過計算，雷達波打到會被反射到別的方向，所以不容易被偵測到。電腦要不停微調操控面，才能飛得穩。",
+    facts: ["美國的 X-47B 在 2013 年完成無人機在航空母艦上的彈射起飛和攔阻降落。", "飛翼的造型最早來自滑翔機研究，鳥類和種子也有類似的翅膀。", "這種飛機很難用人手操控，幾乎都靠飛控電腦的「線傳飛控」。"],
+    phys: { vmin: 12, vmax: 30, turn: 1.0, bat: 600 } },
+  { id: "show", name: "燈光秀無人機", en: "Light-show Drone", cat: "民用", type: "多旋翼．編隊", fly: "", col: "#FFFFFF", acc: "#8A5CC2", at: [-7.4, 6.6], ry: 0,
+    spec: [["重量", "約 200–350 公克"], ["燈光", "可變色 LED"], ["編隊", "數百到上千台一起飛"], ["定位", "RTK 公分級 GPS"]],
+    use: "跨年、運動會、節慶表演，有些城市用它取代煙火，比較安靜、沒有空氣污染。",
+    how: "每一台都不是用人操控，而是事先寫好程式：第幾秒要飛到哪個座標、亮什麼顏色。地面電腦同時指揮所有飛機，排出圖案和文字。",
+    facts: ["一場燈光秀的每一台無人機，都有自己的「飛行程式」，這就是資訊課學的演算法和座標！", "晚上來無人機島，可以看到我們的燈光秀；白天也可以按「燈光秀」按鈕。", "編隊飛行最重要的是不能互相碰撞，所以程式要算好每一台的路線。"] }
+];
+const DR_RINGS = [[-60, 6, -36], [-47, 10, -28], [-36, 14, -42], [-24, 12, -58], [-34, 16, -76], [-54, 12, -82], [-76, 9, -74], [-88, 7, -58]];
+const DR_QUIZ = [
+  { q: "在臺灣，最大起飛重量多少以上的遙控無人機，要先向民航局註冊？", o: ["50 公克", "250 公克", "5 公斤", "全部都不用"], a: 1, why: "最大起飛重量 250 公克以上要註冊，機身也要標示註冊號碼。" },
+  { q: "一般情況下，無人機飛行高度不可以超過距離地面多少？", o: ["30 公尺（100 呎）", "400 公尺", "120 公尺（400 呎）", "沒有限制"], a: 2, why: "上限是距離地面或水面 400 呎，大約 120 公尺，避免跟載人飛機撞在一起。" },
+  { q: "操作無人機時，飛機應該在哪裡？", o: ["操作的人眼睛看得到的範圍內", "只要螢幕看得到就好", "雲層上面", "越遠越好"], a: 0, why: "要在「目視範圍」內飛行，而且一般要在日出後到日落前的白天飛。" },
+  { q: "運動會時操場上有很多人，可以把無人機飛到人群上空拍照嗎？", o: ["可以，飛高一點就好", "不可以飛越人群聚集的上空", "只要是晚上就可以", "只要電池滿電就可以"], a: 1, why: "不可以飛越人群聚集的上空，萬一掉下來會傷到人。要拍要先申請，並和人群保持距離。" },
+  { q: "家住在機場附近，想在家門口飛無人機，應該怎麼做？", o: ["直接飛，反正很近", "機場四周是限航區，要先查詢、申請核准", "飛低一點就不用管", "請同學幫忙看飛機"], a: 1, why: "機場周圍、軍事區等是禁航或限航區，要先用民航局的地圖查詢，需要時申請核准。" }
+];
+const DR = { fly: false, list: [], show: null, keys: {}, stick: { L: [0, 0], R: [0, 0] } };
+const drState = () => store("drone") || {};
+const drSave = o => store("drone", Object.assign(drState(), o));
+const droneLic = () => { const s = drState(); return !!(s.quiz && s.rings); };
+
+/* ---------- 光滑、流線型的零件 ---------- */
+const DMAT = {};
+function dm(c, o) { const k = c + JSON.stringify(o || {}); return DMAT[k] || (DMAT[k] = new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.26, metalness: 0.35 }, o || {}))); }
+function fuseGeo(len, rad, o = {}) {   // 流線型機身（機頭朝 +z）
+  const pts = [], n = 18, nose = o.nose || 0.5, tail = o.tail || 0.18;
+  for (let i = 0; i <= n; i++) { const t = i / n, y = (t - 0.5) * len; let r = Math.pow(Math.sin(Math.PI * t), nose) * rad; if (t < 0.5) r *= tail + (1 - tail) * Math.sin(t * Math.PI); pts.push(new THREE.Vector2(Math.max(0.001, r), y)); }
+  const g = new THREE.LatheGeometry(pts, o.seg || 20); g.rotateX(Math.PI / 2); return g;
+}
+function plateGeo(pts, thick) {   // 平板（機翼、尾翼）：pts 為 [x, z]
+  const s = new THREE.Shape(); pts.forEach((p, i) => i ? s.lineTo(p[0], -p[1]) : s.moveTo(p[0], -p[1]));
+  const g = new THREE.ExtrudeGeometry(s, { depth: thick, bevelEnabled: true, bevelThickness: thick * 0.45, bevelSize: thick * 0.6, bevelSegments: 2, curveSegments: 4 });
+  g.rotateX(-Math.PI / 2); g.translate(0, -thick / 2, 0); return g;
+}
+function wingGeo(span, root, tip, sweep, thick) { const h = span / 2; return plateGeo([[-h, sweep - tip * 0.5], [0, root * 0.5], [h, sweep - tip * 0.5], [h, sweep - tip * 0.5 - tip], [0, -root * 0.5], [-h, sweep - tip * 0.5 - tip]], thick); }
+function dProp(r, col, blades = 2) {
+  const p = new THREE.Group(), hub = part(cyl(r * 0.12, r * 0.12, r * 0.14, 10), dm("#22262C"), 0, 0, 0); p.add(hub);
+  const spin = new THREE.Group(); p.add(spin);
+  for (let i = 0; i < blades; i++) { const pv = new THREE.Group(); pv.rotation.y = i / blades * Math.PI * 2; const b = part(box(r * 0.95, r * 0.03, r * 0.17), dm(col || "#2A2E35", { roughness: 0.4 }), r * 0.52, 0.01, 0); b.rotation.x = 0.2; pv.add(b); spin.add(pv); }
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 24), new THREE.MeshBasicMaterial({ color: "#E8EEF5", transparent: true, opacity: 0.0, depthWrite: false, side: THREE.DoubleSide }));
+  disc.rotation.x = -Math.PI / 2; disc.position.y = 0.012; disc.userData.noMerge = true; p.add(disc);
+  p.userData = { spin, disc }; return p;
+}
+function navLight(col, s = 0.35) { const g = glow(col, s); g.userData.nav = true; return g; }
+/* ---------- 八款無人機 ---------- */
+function buildDrone(id) {
+  const d = DRONES.find(x => x.id === id), g = new THREE.Group(), props = [], body = dm(d.col), acc = dm(d.acc), dark = dm("#1E2228", { roughness: 0.35 }), glass = dm("#0E1A2A", { roughness: 0.05, metalness: 0.6 });
+  const addProp = (x, y, z, r, cw, col) => { const p = dProp(r, col); p.position.set(x, y, z); p.userData.dir = cw ? 1 : -1; g.add(p); props.push(p); return p; };
+  if (id === "aerial" || id === "fpv" || id === "show") {
+    const fpv = id === "fpv", show = id === "show", arm = fpv ? 0.62 : show ? 0.5 : 0.7;
+    if (fpv) { g.add(part(box(0.5, 0.06, 0.9), dark, 0, 0.1, 0)); const can = part(sph(0.26, 16, 10), acc, 0, 0.22, 0.02); can.scale.set(0.9, 0.55, 1.35); g.add(can); g.add(part(box(0.16, 0.12, 0.1), dark, 0, 0.33, 0.25, -0.5, 0, 0)); g.add(part(cyl(0.05, 0.05, 0.03, 12), glass, 0, 0.36, 0.31, Math.PI / 2 - 0.5, 0, 0)); g.add(part(cyl(0.012, 0.012, 0.3, 4), dark, 0, 0.35, -0.38, -0.7, 0, 0)); }
+    else { const b = part(sph(0.34, 22, 14), body, 0, 0.16, 0); b.scale.set(0.95, 0.55, 1.5); g.add(b); const top = part(sph(0.22, 18, 10), show ? dm("#E6E8EE") : dm("#3A4049"), 0, 0.27, -0.05); top.scale.set(0.9, 0.35, 1.4); g.add(top); }
+    [[1, 1], [-1, 1], [1, -1], [-1, -1]].forEach(([sx, sz], i) => {
+      const x = sx * arm * 0.707, z = sz * arm * 0.707, a = Math.atan2(x, z);
+      const am = part(fpv ? box(0.07, 0.04, arm) : cyl(0.035, 0.05, arm, 8), sz > 0 && !fpv && !show ? acc : fpv ? dark : body, x / 2, 0.14, z / 2); if (!fpv) am.rotation.set(Math.PI / 2, 0, 0); am.rotation.y = a; if (!fpv) { am.rotation.set(0, 0, 0); am.lookAt(new V3(x, 0.14, z)); am.rotateX(Math.PI / 2); }
+      g.add(am); g.add(part(cyl(0.07, 0.08, 0.11, 12), dm("#3B4048"), x, 0.2, z));
+      if (!fpv && !show) g.add(part(cyl(0.02, 0.025, 0.2, 6), body, x, 0.04, z));
+      addProp(x, 0.27, z, fpv ? 0.26 : 0.3, (i === 0 || i === 3), fpv ? d.acc : show ? "#DDE3EA" : "#3A3F47");
+    });
+    if (id === "aerial") { const gm = part(sph(0.11, 14, 10), dm("#2A2E35"), 0, 0.02, 0.38); g.add(gm); g.add(part(cyl(0.05, 0.05, 0.06, 12), glass, 0, 0.0, 0.48, Math.PI / 2, 0, 0)); g.add(part(box(0.5, 0.02, 0.05), dark, 0, -0.14, 0.1)); g.add(part(box(0.5, 0.02, 0.05), dark, 0, -0.14, -0.2)); }
+    if (show) { const led = part(sph(0.14, 14, 10), dm("#FFFFFF", { emissive: "#B48CFF", emissiveIntensity: 1.2 }), 0, -0.02, 0); g.add(led); }
+    g.add(navLight("#FF3B3B").translateX(arm * 0.72).translateY(0.18).translateZ(arm * 0.72));
+    g.add(navLight("#35E06A").translateX(-arm * 0.72).translateY(0.18).translateZ(arm * 0.72));
+  } else if (id === "agri") {
+    const b = part(sph(0.5, 22, 14), body, 0, 0.75, 0); b.scale.set(1, 0.55, 1.25); g.add(b);
+    g.add(part(cyl(0.34, 0.28, 0.5, 18), acc, 0, 0.36, 0)); g.add(part(cyl(0.3, 0.3, 0.06, 18), dm("#E9ECEF"), 0, 0.64, 0));
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + Math.PI / 6, x = Math.sin(a) * 1.25, z = Math.cos(a) * 1.25;
+      const am = part(cyl(0.05, 0.06, 1.0, 8), dm("#E6E9EC"), x * 0.55, 0.78, z * 0.55); am.lookAt(new V3(x * 2, 0.78, z * 2).add(g.position)); am.rotateX(Math.PI / 2); g.add(am);
+      g.add(part(cyl(0.1, 0.11, 0.16, 12), dm("#3B4048"), x, 0.84, z)); addProp(x, 0.95, z, 0.52, i % 2 === 0, "#2E3238");
+      g.add(part(cyl(0.02, 0.02, 0.28, 6), dark, x, 0.62, z)); g.add(part(cone(0.04, 0.08, 6), dm("#2E9E5B"), x, 0.46, z, Math.PI, 0, 0)); }
+    [[-0.55], [0.55]].forEach(([x]) => { g.add(part(box(0.06, 0.06, 1.3), dm("#D9DDE2"), x, 0.02, 0)); g.add(part(cyl(0.03, 0.03, 0.6, 6), dm("#D9DDE2"), x * 0.8, 0.3, 0.38, 0, 0, x > 0 ? -0.3 : 0.3)); g.add(part(cyl(0.03, 0.03, 0.6, 6), dm("#D9DDE2"), x * 0.8, 0.3, -0.38, 0, 0, x > 0 ? -0.3 : 0.3)); });
+    g.add(part(box(2.0, 0.04, 0.04), dark, 0, 0.18, 0.2));
+    g.add(navLight("#FF3B3B", 0.45).translateX(1.1).translateY(0.85).translateZ(0.7)); g.add(navLight("#35E06A", 0.45).translateX(-1.1).translateY(0.85).translateZ(0.7));
+  } else if (id === "deliver") {
+    g.add(part(fuseGeo(1.5, 0.3, { nose: 0.55, tail: 0.35 }), body, 0, 0.45, 0)); g.add(part(fuseGeo(0.5, 0.12), glass, 0, 0.6, 0.38));
+    g.add(part(box(0.42, 0.3, 0.5), dm("#E9B85C", { roughness: 0.7, metalness: 0 }), 0, 0.17, 0)); g.add(part(box(0.44, 0.04, 0.06), dm("#B5832E", { roughness: 0.7, metalness: 0 }), 0, 0.17, 0));
+    [-1, 1].forEach(s => { g.add(part(fuseGeo(2.0, 0.06, { nose: 0.3, tail: 0.6 }), acc, s * 0.85, 0.5, 0)); g.add(part(box(0.85, 0.05, 0.16), body, s * 0.42, 0.5, 0.05));
+      addProp(s * 0.85, 0.62, 0.78, 0.38, s > 0, "#2F3540"); addProp(s * 0.85, 0.62, -0.78, 0.38, s < 0, "#2F3540"); g.add(part(cyl(0.06, 0.07, 0.1, 10), dm("#3B4048"), s * 0.85, 0.56, 0.78)); g.add(part(cyl(0.06, 0.07, 0.1, 10), dm("#3B4048"), s * 0.85, 0.56, -0.78)); });
+    g.add(part(plateGeo([[-0.04, -0.55], [0.04, -0.55], [0.03, -0.85], [-0.03, -0.85]], 0.02), acc, 0, 0.7, 0));
+    g.add(navLight("#FF3B3B").translateX(0.85).translateY(0.5).translateZ(1.0)); g.add(navLight("#35E06A").translateX(-0.85).translateY(0.5).translateZ(1.0));
+  } else if (id === "vtol") {
+    g.add(part(fuseGeo(2.0, 0.24, { nose: 0.45, tail: 0.25 }), body, 0, 0.5, 0.15)); g.add(part(fuseGeo(0.7, 0.13), glass, 0, 0.62, 0.62));
+    g.add(part(wingGeo(3.4, 0.55, 0.32, -0.08, 0.05), body, 0, 0.62, 0.1)); g.add(part(box(3.3, 0.012, 0.06), acc, 0, 0.66, 0.34));
+    [-1, 1].forEach(s => { g.add(part(fuseGeo(2.4, 0.06, { nose: 0.3, tail: 0.7 }), dm("#DCE1E6"), s * 0.75, 0.56, -0.2));
+      addProp(s * 0.75, 0.68, 0.85, 0.34, s > 0, "#30353D"); addProp(s * 0.75, 0.68, -1.25, 0.34, s < 0, "#30353D");
+      g.add(part(plateGeo([[-0.03, -1.15], [0.03, -1.15], [0.03, -1.45], [-0.03, -1.45]], 0.02), acc, s * 0.75, 0.75, 0, 0, 0, 0)); const fin = part(box(0.03, 0.34, 0.26), acc, s * 0.75, 0.75, -1.32); g.add(fin); });
+    g.add(part(box(1.56, 0.03, 0.2), acc, 0, 0.92, -1.32));
+    const push = dProp(0.28, "#30353D"); push.rotation.x = Math.PI / 2; push.position.set(0, 0.5, -0.88); push.userData.dir = 1; push.userData.axis = "y"; g.add(push); props.push(push);
+    g.add(navLight("#FF3B3B").translateX(1.7).translateY(0.62)); g.add(navLight("#35E06A").translateX(-1.7).translateY(0.62));
+    [-0.12, 0.12].forEach(x => g.add(part(cyl(0.015, 0.015, 0.35, 5), dark, x, 0.25, 0.3)));
+  } else if (id === "male") {
+    g.add(part(fuseGeo(3.4, 0.26, { nose: 0.38, tail: 0.15 }), body, 0, 0.62, 0.1));
+    const dome = part(sph(0.27, 18, 12), body, 0, 0.72, 1.05); dome.scale.set(1, 0.95, 1.6); g.add(dome);
+    g.add(part(sph(0.13, 14, 10), dm("#3B434D"), 0, 0.38, 1.0)); g.add(part(cyl(0.05, 0.05, 0.05, 10), glass, 0, 0.34, 1.12, Math.PI / 2, 0, 0));
+    g.add(part(wingGeo(5.2, 0.5, 0.26, -0.12, 0.05), body, 0, 0.72, 0.05));
+    [-1, 1].forEach(s => { const v = part(plateGeo([[0, 0], [0.75, -0.42], [0.75, -0.66], [0, -0.42]], 0.035), body, 0, 0.7, -1.2); v.rotation.z = s > 0 ? 0.62 : Math.PI - 0.62; g.add(v); });
+    g.add(part(plateGeo([[-0.03, 0], [0.03, 0], [0.03, -0.3], [-0.03, -0.3]], 0.03), body, 0, 0.42, -1.25, 0, 0, Math.PI / 2));
+    const push = dProp(0.36, "#3A4049", 3); push.rotation.x = Math.PI / 2; push.position.set(0, 0.62, -1.72); push.userData.dir = 1; g.add(push); props.push(push);
+    [-0.5, 0.5].forEach(x => g.add(part(cyl(0.018, 0.018, 0.5, 5), dark, x, 0.3, 0.1))); g.add(part(cyl(0.018, 0.018, 0.45, 5), dark, 0, 0.3, 1.0));
+    g.add(part(box(5.0, 0.01, 0.04), acc, 0, 0.765, 0.18));
+    g.add(navLight("#FF3B3B", 0.4).translateX(2.6).translateY(0.72)); g.add(navLight("#35E06A", 0.4).translateX(-2.6).translateY(0.72));
+  } else if (id === "wing") {
+    g.add(part(plateGeo([[0, 1.9], [3.0, -0.55], [2.75, -0.95], [1.45, -0.35], [0.85, -1.05], [0, -0.55], [-0.85, -1.05], [-1.45, -0.35], [-2.75, -0.95], [-3.0, -0.55]], 0.09), body, 0, 0.55, 0));
+    const hump = part(sph(0.6, 24, 14), body, 0, 0.6, 0.35); hump.scale.set(0.95, 0.32, 2.0); g.add(hump);
+    const inl = part(sph(0.22, 16, 10), dark, 0, 0.77, 0.4); inl.scale.set(1.3, 0.4, 0.9); g.add(inl);
+    g.add(part(cyl(0.16, 0.18, 0.12, 14), dm("#2A2E35"), 0, 0.62, -0.62, Math.PI / 2, 0, 0));
+    g.add(part(box(5.5, 0.01, 0.03), acc, 0, 0.62, -0.2));
+    g.add(navLight("#FF3B3B", 0.3).translateX(2.9).translateY(0.57).translateZ(-0.7)); g.add(navLight("#35E06A", 0.3).translateX(-2.9).translateY(0.57).translateZ(-0.7));
+    [-0.6, 0.6].forEach(x => g.add(part(cyl(0.02, 0.02, 0.4, 5), dark, x, 0.32, -0.2))); g.add(part(cyl(0.02, 0.02, 0.4, 5), dark, 0, 0.32, 1.0));
+  }
+  const ex = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.9, 10), new THREE.MeshBasicMaterial({ color: "#FFB46A", transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+  if (id === "wing") { ex.rotation.x = -Math.PI / 2; ex.position.set(0, 0.62, -1.1); g.add(ex); }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
+  g.userData = { id, props, ex };
+  return g;
+}
+function spinProps(g, rate, dt) {
+  const { props } = g.userData; if (!props) return;
+  props.forEach(p => { const u = p.userData; u.spin.rotation.y += rate * dt * (u.dir || 1); u.disc.material.opacity = clamp((rate - 12) / 60, 0, 0.22); u.spin.visible = rate < 55 || Math.random() < 0.55; });
+}
+/* ---------- 島嶼 ---------- */
+function makeDroneIsland() {
+  const root = new THREE.Group();
+  floatingIsland(DRR, 2.6, root, 0, 0, { type: "droneIsle" });
+  const pave = M("#5E6670"), line = M("#F5F2E8"), yel = M("#F2C230");
+  root.add(part(box(21.5, 0.06, 2.6), pave, 0, 0.03, -3.6));
+  for (let i = -9; i <= 9; i += 2) root.add(part(box(1.0, 0.02, 0.12), line, i, 0.07, -3.6));
+  [-10.2, 10.2].forEach(x => { for (let k = -1; k <= 1; k++) root.add(part(box(0.5, 0.02, 0.14), line, x - Math.sign(x) * 0.6, 0.07, -3.6 + k * 0.6)); });
+  root.add(part(box(16, 0.04, 3.4), M("#7C848E"), 0.2, 0.025, -8.1));
+  root.add(part(box(1.0, 0.05, 1.2), pave, -9.4, 0.03, -6.0));
+  // 停機坪（H）
+  DRONES.filter(d => d.fly === "multi").forEach(d => {
+    const [x, z] = d.at; root.add(part(cyl(1.35, 1.35, 0.05, 28), M("#4E565F"), x, 0.03, z)); root.add(part(new THREE.TorusGeometry(1.18, 0.05, 6, 32), yel, x, 0.07, z, Math.PI / 2, 0, 0));
+    root.add(part(box(0.12, 0.02, 0.9), line, x - 0.3, 0.07, z)); root.add(part(box(0.12, 0.02, 0.9), line, x + 0.3, 0.07, z)); root.add(part(box(0.6, 0.02, 0.12), line, x, 0.07, z));
+  });
+  { const [x, z] = DRONES.find(d => d.id === "show").at; root.add(part(box(3.2, 0.05, 2.6), M("#3D3550"), x + 0.5, 0.03, z)); }
+  // 塔台
+  const tw = new THREE.Group(); tw.position.set(-2.8, 0, 8.6);
+  tw.add(part(cyl(0.55, 0.75, 4.2, 12), M("#EDEBE4"), 0, 2.1, 0)); tw.add(part(cyl(1.25, 0.9, 0.9, 12), dm("#5FA9D6", { roughness: 0.08, metalness: 0.5, transparent: true, opacity: 0.85 }), 0, 4.65, 0));
+  tw.add(part(cyl(1.4, 1.4, 0.16, 12), M("#3E4651"), 0, 5.18, 0)); tw.add(part(cyl(0.04, 0.04, 1.0, 5), M("#3E4651"), 0, 5.7, 0)); tw.add(part(box(0.9, 0.06, 0.06), M("#3E4651"), 0, 6.0, 0));
+  root.add(tw);
+  // 弧形機庫
+  const hg = new THREE.Group(); hg.position.set(4.4, 0, 7.6);
+  const arc = new THREE.CylinderGeometry(2.2, 2.2, 3.6, 24, 1, true, -Math.PI / 2, Math.PI); arc.rotateX(-Math.PI / 2);
+  const shell = new THREE.Mesh(arc, mat("hangar", "#D8DDE3", { side: THREE.DoubleSide, roughness: 0.5, metalness: 0.4 })); shell.castShadow = true; hg.add(shell);
+  hg.add(part(box(4.4, 0.05, 3.6), M("#6B737D"), 0, 0.03, 0));
+  const back = new THREE.Mesh(new THREE.CircleGeometry(2.2, 24, 0, Math.PI), M("#C6CCD3")); back.position.set(0, 0, 1.8); hg.add(back);
+  for (let i = -1; i <= 1; i++) hg.add(part(box(0.06, 0.02, 3.6), M("#9AA3AD"), i * 1.2, 2.12, 0));
+  const sign = signBoard("無人機島", "#2F7FD8", 2.6); sign.position.set(0, 2.25, -1.85); sign.scale.setScalar(0.8); hg.add(sign);
+  root.add(hg);
+  // 風向袋
+  const ws = new THREE.Group(); ws.position.set(10.2, 0, -0.6); ws.add(part(cyl(0.05, 0.06, 2.4, 6), M("#E9E6DD"), 0, 1.2, 0));
+  const sock = part(cone(0.22, 1.1, 10, true), M("#F07B2B"), 0.5, 2.3, 0, 0, 0, Math.PI / 2); ws.add(sock); [0.25, 0.65].forEach(x => ws.add(part(cyl(0.2, 0.17, 0.12, 10), M("#FFFFFF"), x, 2.3, 0, 0, 0, Math.PI / 2))); root.add(ws);
+  [[-10.6, 2.6], [10.4, 3.6], [1, 11.2]].forEach(([x, z]) => { const t = tree("round", 0.8); t.position.set(x, 0, z); root.add(t); });
+  mergeStatic(root); root.position.copy(DPOS); scene.add(root);
+  // 動態展示機
+  const dyn = new THREE.Group(); dyn.position.copy(DPOS); scene.add(dyn); DR.dyn = dyn;
+  DRONES.forEach(d => {
+    const [x, z] = d.at;
+    if (d.id === "show") {
+      for (let i = 0; i < 6; i++) { const m = buildDrone("show"); m.scale.setScalar(0.9); m.position.set(x - 0.6 + (i % 3) * 1.0, 0.06, z - 0.5 + Math.floor(i / 3) * 1.0); dyn.add(m); if (!i) DR.list.push({ d, m, base: 0.06 }); else DR.list.push({ d, m, base: 0.06, mute: true }); }
+    } else {
+      const m = buildDrone(d.id); m.position.set(x, d.fly === "multi" ? 0.9 : 0.05, z); m.rotation.y = d.ry; m.scale.setScalar(d.fly === "multi" ? (d.id === "agri" ? 0.95 : 1.35) : (d.id === "male" ? 1.05 : 1.0)); dyn.add(m);
+      DR.list.push({ d, m, base: m.position.y, hover: d.fly === "multi" });
+    }
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(d.fly === "wing" ? 4 : 2.2, 1.8, d.fly === "wing" ? 3.2 : 2.2), new THREE.MeshBasicMaterial({ visible: false }));
+    hit.position.set(x, 0.9, z); hit.userData = { pick: true, type: "drone", id: d.id }; dyn.add(hit); pickables.push(hit);
+    const an = new THREE.Object3D(); an.position.set(x, d.fly === "wing" ? 2.2 : 2.6, z); dyn.add(an);
+    addLabel(an, 0, "drone", { d }, () => openDrone(d.id));
+  });
+  // 步道橋：二年級島 → 無人機島
+  const g2 = ANG[1] * Math.PI / 180, gp = new V3(Math.cos(g2) * D, 0, Math.sin(g2) * D), th0 = Math.atan2(-gp.x, -gp.z);
+  let best = null;
+  for (let k = 0; k < SUBJECTS.length; k++) { const th = th0 + (36 + k * 32) * Math.PI / 180, p = gp.clone().add(new V3(Math.sin(th) * RI, 0, Math.cos(th) * RI)); const dd = p.distanceTo(DPOS); if (!best || dd < best.d) best = { p, d: dd }; }
+  const dir = DPOS.clone().sub(best.p).normalize(), A = best.p.clone().addScaledVector(dir, RS - 0.3), B = DPOS.clone().addScaledVector(dir, -(DRR - 0.3));
+  const br = new THREE.Group(), L = A.distanceTo(B), N = Math.round(L / 0.9), yaw = Math.atan2(dir.x, dir.z), side = new V3(dir.z, 0, -dir.x);
+  const yAt = t => Math.sin(Math.PI * t) * 6.5;
+  for (let i = 0; i < N; i++) {
+    const t0 = i / N, t1 = (i + 1) / N, p0 = A.clone().lerp(B, t0), p1 = A.clone().lerp(B, t1), y0 = yAt(t0), y1 = yAt(t1), mid = p0.clone().add(p1).multiplyScalar(0.5);
+    const seg = part(box(1.6, 0.16, L / N * 1.02), M("#B9C3CE"), mid.x, (y0 + y1) / 2, mid.z); seg.rotation.set(-Math.atan2(y1 - y0, L / N), yaw, 0, "YXZ"); br.add(seg);
+    [-1, 1].forEach(sg => { const o = side.clone().multiplyScalar(sg * 0.82), rl = part(box(0.08, 0.25, L / N * 1.02), M("#2F7FD8"), mid.x + o.x, (y0 + y1) / 2 + 0.2, mid.z + o.z); rl.rotation.copy(seg.rotation); br.add(rl); });
+    if (i % 6 === 3 && y0 > 1.5) br.add(part(cyl(0.18, 0.24, y0 - SEA_Y, 8), M("#D8D2C4"), mid.x, (y0 + SEA_Y) / 2, mid.z));
+  }
+  mergeStatic(br); scene.add(br);
+  const an = new THREE.Object3D(); an.position.copy(DPOS).add(new V3(-3, 6.5, -12.5)); scene.add(an);
+  addLabel(an, 0, "plain", { name: "🛸 無人機島" }, () => go("drone"));
+  makeDroneShow();
+}
+/* ---------- 燈光秀（夜晚自動、白天可按按鈕） ---------- */
+const SHOW_N = 72;
+function showShapes() {
+  const P = [], ring = (n, r, f) => Array.from({ length: n }, (_, i) => { const a = i / n * Math.PI * 2; return f ? f(a) : [Math.cos(a) * r, Math.sin(a) * r]; });
+  const fill = (arr) => { const out = []; for (let i = 0; i < SHOW_N; i++) out.push(arr[Math.floor(i * arr.length / SHOW_N)]); return out; };
+  P.push({ name: "圓", col: ["#7FD3FF", "#FFFFFF"], pts: fill(ring(SHOW_N, 7)) });
+  P.push({ name: "愛心", col: ["#FF5C8A", "#FFC2D4"], pts: fill(ring(SHOW_N, 1, a => { const t = a; return [16 * Math.pow(Math.sin(t), 3) * 0.45, (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * 0.45]; })) });
+  P.push({ name: "星星", col: ["#FFD34A", "#FFF3B0"], pts: fill(ring(SHOW_N, 1, a => { const k = (a / (Math.PI * 2)) * 10, i = Math.floor(k), f = k - i, r0 = i % 2 ? 3.2 : 8, r1 = i % 2 ? 8 : 3.2, a0 = i / 10 * Math.PI * 2 + Math.PI / 2, a1 = (i + 1) / 10 * Math.PI * 2 + Math.PI / 2; const x0 = Math.cos(a0) * r0, y0 = Math.sin(a0) * r0, x1 = Math.cos(a1) * r1, y1 = Math.sin(a1) * r1; return [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f]; })) });
+  { const pts = ring(24, 3.2); for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; for (let k = 0; k < 4; k++) pts.push([Math.cos(a) * (4.6 + k * 1.0), Math.sin(a) * (4.6 + k * 1.0)]); } P.push({ name: "太陽", col: ["#FF9F2E", "#FFE07A"], pts: fill(pts) }); }
+  { const pts = []; [[0, 0], [-4.5, 0], [4.5, 0]].forEach(([cx, cy]) => { for (let i = 0; i < 24; i++) { const t = i / 24 * 4, s = Math.floor(t), f = t - s, c = [[0, 4], [3, 0], [0, -4], [-3, 0], [0, 4]]; pts.push([cx + c[s][0] + (c[s + 1][0] - c[s][0]) * f, cy + c[s][1] + (c[s + 1][1] - c[s][1]) * f]); } }); P.push({ name: "排灣菱形紋", col: ["#E0463C", "#F7C548"], pts: fill(pts) }); }
+  P.push({ name: "笑臉", col: ["#FFE45C", "#FFFFFF"], pts: fill([].concat(ring(44, 7), [[-2.4, 2.4], [-2.4, 2.0], [2.4, 2.4], [2.4, 2.0]], ring(24, 1, a => { const t = Math.PI * 1.15 + (a / (Math.PI * 2)) * Math.PI * 0.7; return [Math.cos(t) * 4.2, Math.sin(t) * 4.2 + 0.6]; }))) });
+  P.push({ name: "嘉蘭", col: ["#7CF2C2", "#C8FFE9"], pts: textPts("嘉蘭") });
+  return P;
+}
+function textPts(txt) {
+  const c = document.createElement("canvas"); c.width = 160; c.height = 80; const x = c.getContext("2d");
+  x.fillStyle = "#000"; x.fillRect(0, 0, 160, 80); x.fillStyle = "#fff"; x.font = "bold 64px 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(txt, 80, 42);
+  const d = x.getImageData(0, 0, 160, 80).data, on = [];
+  for (let y = 2; y < 80; y += 3) for (let i = 2; i < 160; i += 3) if (d[(y * 160 + i) * 4] > 128) on.push([(i - 80) / 7.5, (40 - y) / 7.5]);
+  if (on.length < 10) return Array.from({ length: SHOW_N }, (_, i) => [Math.cos(i) * 6, Math.sin(i) * 6]);
+  const out = []; for (let i = 0; i < SHOW_N; i++) out.push(on[Math.floor(i * on.length / SHOW_N)]); return out;
+}
+function makeDroneShow() {
+  const g = new THREE.Group(); g.position.copy(DPOS).add(new V3(0, 22, 0)); g.lookAt(new V3(0, 22, 0)); g.visible = false; scene.add(g);
+  const dots = []; for (let i = 0; i < SHOW_N; i++) { const s = glow("#FFFFFF", 1.3); s.position.set((i % 9 - 4) * 1.2, -20 + Math.floor(i / 9) * 0.3, 0); g.add(s); dots.push(s); }
+  DR.show = { g, dots, shapes: showShapes(), k: -1, t: 0, manual: 0, on: false };
+}
+function stepDroneShow(dt) {
+  const S0 = DR.show; if (!S0) return;
+  const want = (S.dark > 0.55 || S0.manual > 0) && !reduceMotion;
+  if (S0.manual > 0) S0.manual -= dt;
+  if (!want) { if (S0.on) { S0.on = false; S0.g.visible = false; } return; }
+  if (!S0.on) { S0.on = true; S0.g.visible = true; S0.k = -1; S0.t = 99; S0.dots.forEach((s, i) => s.position.set((i % 9 - 4) * 1.0, -21, Math.floor(i / 9) * 0.6 - 2)); }
+  S0.t += dt;
+  if (S0.t > 6.5) { S0.t = 0; S0.k = (S0.k + 1) % S0.shapes.length; const sh = S0.shapes[S0.k]; S0.dots.forEach((s, i) => { s.userData.to = new V3(-sh.pts[i][0], sh.pts[i][1], 0); s.material.color.set(sh.col[i % 2]); }); S0.label = sh.name; }
+  const f = 1 - Math.exp(-dt * 1.6);
+  S0.dots.forEach((s, i) => { const to = s.userData.to; if (to) s.position.lerp(to, f); const tw = 1.1 + Math.sin(performance.now() / 300 + i) * 0.15; s.scale.set(tw, tw, 1); });
+}
+/* ---------- 每幀：展示機懸停、螺旋槳 ---------- */
+function stepDroneIsland(dt, time) {
+  stepDroneShow(dt);
+  if (DR.fly) { stepDroneFlight(dt); return; }
+  if (focus.g !== 12 || ui.paused) return;
+  DR.list.forEach((o, i) => {
+    if (o.hover) { o.m.position.y = o.base + Math.sin(time * 1.6 + i) * 0.12; spinProps(o.m, 70, dt); }
+    else if (o.d.id === "vtol" || o.d.id === "male") spinProps(o.m, 6, dt);
+  });
+}
+function dronePose() { const t = DPOS.clone().add(new V3(0, 1, -1)), p = DPOS.clone().add(new V3(14, isMobile() ? 40 : 26, isMobile() ? 42 : 30)); shiftForPanel(t, p); return { target: t, pos: p }; }
+function panelDrone(quiet) {
+  const s = drState(), lic = droneLic();
+  const row = d => '<button class="tr-row drone-row" data-drone="' + d.id + '"><i style="background:' + d.acc + '"></i><b>' + esc(d.name) + '</b><span class="dr-tag ' + (d.cat === "軍用" ? "mil" : "civ") + '">' + d.cat + '</span><small>' + esc(d.type) + (d.fly ? "．可駕駛" : "") + '</small></button>';
+  openPanel('<div class="p-top"><span class="crumb">嘉蘭樂學島．衛星島</span><button class="p-close" aria-label="關閉">×</button></div>' +
+    '<h2 style="--c:#2F7FD8"><i class="dot"></i>🛸 無人機島</h2><p class="p-lede">從二年級島走步道橋就能到。機庫裡停著八款主流無人機，有民用也有軍用。認識它們的原理，坐上駕駛座試飛，再考一張飛行員執照！</p>' +
+    '<div class="ticket-line drone-lic"><span>🪪 嘉蘭無人機飛行員證</span><small>' + (s.quiz ? "✅" : "⬜") + ' 法規小教室　' + (s.rings ? "✅" : "⬜") + ' 光環挑戰' + (s.best ? '（最佳 ' + s.best.toFixed(1) + ' 秒）' : "") + '　' + (s.code ? "✅" : "⬜") + ' 程式飛行</small>' + (lic ? '<button class="btn sm" id="drLic">看執照</button>' : '<small>完成前兩項就能拿到執照，還送 1 顆校寵扭蛋！</small>') + '</div>' +
+    '<div class="row dr-acts"><button class="btn" id="drFly">🎮 試飛空拍機</button><button class="btn ghost" id="drRings">💍 光環挑戰</button><button class="btn ghost" id="drQuiz">📝 法規小教室</button><button class="btn ghost" id="drCode">🧑‍💻 程式飛行</button><button class="btn ghost" id="drShow">🌃 燈光秀</button></div>' +
+    '<h3>🕊 民用無人機</h3><div class="tr-rows">' + DRONES.filter(d => d.cat === "民用").map(row).join("") + '</div>' +
+    '<h3>🛡 軍用無人機</h3><div class="tr-rows">' + DRONES.filter(d => d.cat === "軍用").map(row).join("") + '</div>' +
+    '<div class="row" style="margin-top:14px"><button class="btn ghost" id="drPrint">🖨 列印戶外教育學習單</button></div>' +
+    '<p class="small">飛行規定以交通部民用航空局最新公告為準。模擬器的速度、高度以 1 格 = 2 公尺換算，和真實飛機不完全一樣。</p>', "subject");
+  $all("[data-drone]").forEach(b => b.addEventListener("click", () => openDrone(b.getAttribute("data-drone"))));
+  $("#drFly").addEventListener("click", () => startDroneFlight("aerial"));
+  $("#drRings").addEventListener("click", () => pickDroneFor("rings"));
+  $("#drQuiz").addEventListener("click", openDroneQuiz);
+  $("#drCode").addEventListener("click", openDroneCode);
+  $("#drShow").addEventListener("click", () => { DR.show.manual = 46; toast("🌃 燈光秀開始！看看無人機島上空。"); flyTo({ target: DPOS.clone().add(new V3(0, 20, 0)), pos: DPOS.clone().add(new V3(34, 18, 40)) }, 1.6); });
+  $("#drPrint").addEventListener("click", printDroneSheet);
+  const lb = $("#drLic"); if (lb) lb.addEventListener("click", openDroneLicense);
+  if (!quiet) speak("無人機島。");
+}
+function openDrone(id) {
+  const d = DRONES.find(x => x.id === id); if (!d) return;
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  openModal('<div class="npc-card drone-card" style="--s:' + d.acc + '"><button class="m-close" aria-label="關閉">×</button>' +
+    '<div class="npc-head"><div class="npc-ava drone">' + (d.cat === "軍用" ? "🛡" : d.fly === "wing" ? "✈️" : "🛸") + '</div><div><small>' + esc(d.en) + '</small><h2>' + esc(d.name) + '</h2><p class="npc-why"><span class="dr-tag ' + (d.cat === "軍用" ? "mil" : "civ") + '">' + d.cat + '</span> <span class="dr-tag">' + esc(d.type) + '</span></p></div></div>' +
+    '<dl class="kv">' + d.spec.map(r => '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>').join("") + '<dt>用途</dt><dd>' + esc(d.use) + '</dd></dl>' +
+    '<h3>⚙️ 它怎麼飛？</h3><p class="npc-tip">' + esc(d.how) + '</p>' +
+    '<h3>🔍 你知道嗎？</h3><ul class="goal-list">' + d.facts.map(f => '<li>' + esc(f) + '</li>').join("") + '</ul>' +
+    '<p class="small">數字為同類機型的大約範圍，不是特定廠牌型號。</p>' +
+    '<div class="row npc-act"><button class="say" id="drSay">' + ICON_SPEAK + '聽一聽</button>' + (d.fly ? '<button class="btn" id="drGo">🎮 駕駛這台</button>' : '<button class="btn" id="drGo">🌃 看燈光秀</button>') + '</div></div>', "npc-sheet");
+  $("#drSay").addEventListener("click", () => speak(d.name + "。" + d.use + d.how + d.facts.join(""), { force: true }));
+  $("#drGo").addEventListener("click", () => { if (d.fly) startDroneFlight(d.id); else { closeModal(); $("#drShow") ? $("#drShow").click() : (DR.show.manual = 46); } });
+  speak(d.name + "。" + d.use);
+}
+function pickDroneFor(mission) {
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  openModal('<div class="npc-card" style="--s:#2F7FD8"><button class="m-close" aria-label="關閉">×</button><div class="npc-head"><div class="npc-ava drone">💍</div><div><small>無人機島．任務</small><h2>光環挑戰</h2></div></div>' +
+    '<div class="npc-bubble">從無人機島出發，依照箭頭飛過 ' + DR_RINGS.length + ' 個光環，越快越好！最後要飛回無人機島。多旋翼比較好控制；固定翼速度快，但不能停在空中喔。</div>' +
+    '<div class="tr-rows">' + DRONES.filter(d => d.fly).map(d => '<button class="tr-row" data-pick="' + d.id + '"><i style="background:' + d.acc + '"></i><b>' + esc(d.name) + '</b><small>' + (d.fly === "multi" ? "多旋翼．好上手" : "固定翼．進階") + '</small></button>').join("") + '</div></div>', "npc-sheet");
+  $all("[data-pick]").forEach(b => b.addEventListener("click", () => startDroneFlight(b.getAttribute("data-pick"), mission)));
+}
+/* ---------- 飛行模擬 ---------- */
+let DGROUND = null;
+function groundCircles() {
+  if (DGROUND) return DGROUND;
+  const c = [[0, 0, R_HUB], [DPOS.x, DPOS.z, DRR], [84, -24, 13.5], [-84, 6, 11], [80, 34, 12]];
+  ANG.forEach(a => { const r = a * Math.PI / 180, gp = new V3(Math.cos(r) * D, 0, Math.sin(r) * D), th0 = Math.atan2(-gp.x, -gp.z); c.push([gp.x, gp.z, RM + 0.6]);
+    for (let k = 0; k < SUBJECTS.length; k++) { const th = th0 + (36 + k * 32) * Math.PI / 180; c.push([gp.x + Math.sin(th) * RI, gp.z + Math.cos(th) * RI, RS]); } });
+  return (DGROUND = c);
+}
+function groundY(x, z) { for (const [cx, cz, r] of groundCircles()) if ((x - cx) ** 2 + (z - cz) ** 2 < r * r) return 0; return SEA_Y; }
+function startDroneFlight(id, mission) {
+  const d = DRONES.find(x => x.id === id); if (!d || !d.fly) return;
+  closeModal(); stopTour(); if (DR.fly) endDroneFlight(true);
+  if (KG.on || PARK.ride || RIDE.on) return;
+  const m = buildDrone(id); m.scale.setScalar(d.fly === "multi" ? (id === "agri" ? 0.7 : 1.0) : (id === "male" ? 0.7 : 0.8)); scene.add(m);
+  const F = DR.F = { d, m, P: d.phys, mission: mission || "", pos: new V3(), vel: new V3(), yaw: 0, pitch: 0, roll: 0, spd: 0, thr: 0.45, bat: 100, landed: true, t: 0, cam: "chase", camPos: new V3(), crash: 0, ring: 0, rt: 0, msgT: 0, warnT: 0, legal: true, prog: null };
+  drSpawn(F);
+  DR.list.forEach(o => { if (o.d.id === id && !o.mute) o.m.visible = false; });
+  DR.fly = true; tween.active = false; controls.enabled = false;
+  if (hasPanel() && !panelMin()) { DR.hadPanel = true; setPanelMin(true, false); } else DR.hadPanel = false;
+  document.body.classList.add("drone-on");
+  drHUD(); drMotor(true);
+  if (F.mission === "rings") drRingsBuild();
+  addEventListener("keydown", drKey, true); addEventListener("keyup", drKey, true);
+  drMsg(d.fly === "multi" ? "往上推左搖桿（或按 W）起飛！" : "自動彈射起飛！左搖桿上下調油門，右搖桿控制方向。", 4);
+  speak(d.name + "，準備起飛！");
+}
+function drSpawn(F) {
+  const d = F.d, [x, z] = d.at;
+  F.vel.set(0, 0, 0); F.pitch = F.roll = 0; F.bat = Math.max(F.bat, 100); F.crash = 0;
+  if (d.fly === "multi") { F.pos.set(DPOS.x + x, 0.12, DPOS.z + z); F.yaw = 0.6; F.landed = true; F.spd = 0; }
+  else { F.pos.set(DPOS.x - 10, 4, DPOS.z - 3.6); F.yaw = Math.PI / 2; F.spd = (F.P.vmin + F.P.vmax) / 2; F.thr = 0.5; F.landed = false; }
+  if (F.prog) { F.pos.set(DPOS.x - 6.4, 0.12, DPOS.z + 2.6); F.yaw = Math.PI; }
+  F.camPos.copy(F.pos).add(new V3(-Math.sin(F.yaw) * 6, 3, -Math.cos(F.yaw) * 6));
+}
+function drInput() {
+  const k = DR.keys, sL = DR.stick.L, sR = DR.stick.R;
+  let thr = sL[1] + (k.w ? 1 : 0) - (k.s ? 1 : 0), yaw = sL[0] + (k.d ? 1 : 0) - (k.a ? 1 : 0), pit = sR[1] + (k.up ? 1 : 0) - (k.down ? 1 : 0), rol = sR[0] + (k.right ? 1 : 0) - (k.left ? 1 : 0);
+  const gp = navigator.getGamepads ? [...navigator.getGamepads()].find(g => g && g.axes && g.axes.length >= 4) : null;
+  if (gp) { const dz = v => Math.abs(v) < 0.12 ? 0 : v; thr += -dz(gp.axes[1]); yaw += dz(gp.axes[0]); pit += -dz(gp.axes[3]); rol += dz(gp.axes[2]); }
+  return { thr: clamp(thr, -1, 1), yaw: clamp(yaw, -1, 1), pit: clamp(pit, -1, 1), rol: clamp(rol, -1, 1) };
+}
+const _df = new V3(), _dr = new V3(), _dc = new V3(), _dl = new V3();
+function stepDroneFlight(dt) {
+  const F = DR.F; if (!F) return;
+  F.t += dt; if (F.msgT > 0 && (F.msgT -= dt) <= 0) drMsg("");
+  const P = F.P, d = F.d;
+  if (F.crash > 0) { F.crash -= dt; F.m.rotation.x += dt * 3; F.m.position.y = Math.max(SEA_Y - 0.4, F.m.position.y - dt * 3); if (F.crash <= 0) { drSpawn(F); if (F.mission === "rings") drRingsReset(); } drCamera(F, dt); drHUDUpdate(F); return; }
+  let I = drInput();
+  if (F.prog) I = drAuto(F, dt);
+  if (d.fly === "multi") {
+    _df.set(Math.sin(F.yaw), 0, Math.cos(F.yaw)); _dr.set(-Math.cos(F.yaw), 0, Math.sin(F.yaw));
+    if (F.landed) { if (I.thr > 0.25 && F.bat > 0) { F.landed = false; drMsg("起飛！放開搖桿就會停在空中（懸停）。", 3); } else { I.pit = I.rol = I.yaw = 0; } }
+    const tgt = _dc.copy(_df).multiplyScalar(I.pit * P.vmax).addScaledVector(_dr, I.rol * P.vmax); tgt.y = F.landed ? 0 : I.thr * P.climb;
+    const k = 1 - Math.exp(-P.acc * dt); F.vel.lerp(tgt, k);
+    F.yaw -= I.yaw * P.yaw * dt;
+    F.pitch += (I.pit * P.tilt - F.pitch) * Math.min(1, dt * 6); F.roll += (I.rol * P.tilt - F.roll) * Math.min(1, dt * 6);
+    { const g0 = groundY(F.pos.x, F.pos.z); if (g0 >= 0 && F.pos.y - g0 < 1.6 && F.vel.y < -1.5) F.vel.y = -1.5; }   // 接近地面自動減速
+    F.pos.addScaledVector(F.vel, dt);
+    const gy = groundY(F.pos.x, F.pos.z) + 0.12;
+    if (F.pos.y <= gy) {
+      if (gy < 0 && !F.landed) return drCrash(F, "掉進海裡了！");
+      const hs = Math.hypot(F.vel.x, F.vel.z);
+      if (!F.landed && hs > P.vmax * 0.7) return drCrash(F, "撞地了！降落前要先減速。");
+      F.pos.y = gy; F.vel.set(0, 0, 0); if (!F.landed && I.thr <= 0.05) { F.landed = true; drMsg("✅ 平穩降落！", 2); drLanded(F); }
+    }
+    F.spd = Math.hypot(F.vel.x, F.vel.z);
+    F.m.rotation.set(F.pitch, F.yaw, F.roll, "YXZ");
+    spinProps(F.m, F.landed ? 6 : 75 + I.thr * 25, dt);
+  } else {
+    F.thr = clamp(F.thr + I.thr * dt * 0.55, 0, 1);
+    const vt = P.vmin + F.thr * (P.vmax - P.vmin); F.spd += (vt - F.spd) * Math.min(1, dt * 0.8);
+    const bankT = I.rol * 0.85; F.roll += (bankT - F.roll) * Math.min(1, dt * 2.4);
+    const pT = -I.pit * 0.45; F.pitch += (pT - F.pitch) * Math.min(1, dt * 2.0);
+    F.yaw -= (Math.sin(F.roll) * P.turn * 1.6 + I.yaw * 0.35) * dt;
+    const cp = Math.cos(F.pitch); _dl.set(Math.sin(F.yaw) * cp, Math.sin(F.pitch), Math.cos(F.yaw) * cp);
+    F.vel.copy(_dl).multiplyScalar(F.spd); F.pos.addScaledVector(F.vel, dt);
+    const gy = groundY(F.pos.x, F.pos.z) + 0.15;
+    if (F.pos.y <= gy) {
+      const onRunway = Math.abs(F.pos.z - (DPOS.z - 3.6)) < 1.6 && Math.abs(F.pos.x - DPOS.x) < 10.5;
+      if (gy >= 0 && onRunway && F.vel.y > -2.2 && Math.abs(F.roll) < 0.3) { drMsg("✅ 漂亮的跑道降落！", 3); drLanded(F); F.pos.y = 4; F.pitch = 0.15; }
+      else return drCrash(F, gy < 0 ? "掉進海裡了！固定翼要保持高度。" : "撞地了！固定翼要對準跑道，慢慢下降。");
+    }
+    F.m.rotation.set(-F.pitch, F.yaw, F.roll, "YXZ");
+    spinProps(F.m, 30 + F.thr * 60, dt);
+    if (F.m.userData.ex) F.m.userData.ex.material.opacity = F.d.id === "wing" ? 0.25 + F.thr * 0.5 : 0;
+  }
+  // 法規限高、地理圍籬、電量
+  const agl = F.pos.y - Math.max(0, groundY(F.pos.x, F.pos.z));
+  if (F.pos.y > 80) { F.pos.y = 80; if (F.vel.y > 0) F.vel.y = 0; if (d.fly === "wing") F.pitch = Math.min(F.pitch, 0); }
+  F.legal = agl <= 60;
+  if (!F.legal && (F.warnT -= dt) <= 0) { F.warnT = 4; drMsg("⚠️ 超過 120 公尺法規限高了，請下降！", 3); kartBeep(880, 0.12, 0.08); }
+  const far = Math.hypot(F.pos.x, F.pos.z);
+  if (far > 165) { const back = _dc.set(-F.pos.x, 0, -F.pos.z).normalize(); F.pos.addScaledVector(back, (far - 165) * 0.2); if ((F.warnT -= dt) <= 0) { F.warnT = 3; drMsg("📡 快超出遙控距離，請往回飛！", 2.5); } if (d.fly === "wing") F.yaw += (Math.atan2(back.x, back.z) - F.yaw > 0 ? 1 : -1) * dt * 0.6; }
+  if (!F.landed && !F.prog) { F.bat = Math.max(0, F.bat - dt * 100 / P.bat * (d.fly === "multi" ? 0.7 + 0.5 * (F.spd / P.vmax) : 0.6 + 0.6 * F.thr)); if (F.bat < 20 && !F.lowWarn) { F.lowWarn = true; drMsg("🔋 電量低於 20%，請準備降落！", 3); } if (F.bat <= 0) { drMsg("🔋 電量耗盡，自動返航降落。", 3); drSpawn(F); F.lowWarn = false; if (F.mission === "rings") drRingsReset(); } }
+  F.m.position.copy(F.pos);
+  if (F.mission === "rings") drRingsStep(F, dt);
+  drCamera(F, dt); drHUDUpdate(F); drMotorUpdate(F);
+}
+function drCamera(F, dt) {
+  const back = F.d.fly === "wing" ? 7 : F.d.id === "agri" ? 5 : 3.6, up = F.d.fly === "wing" ? 2.2 : 1.5;
+  _df.set(Math.sin(F.yaw), 0, Math.cos(F.yaw));
+  if (F.cam === "fpv") {
+    const nose = F.d.fly === "wing" ? 1.4 : 0.5, cp = Math.cos(F.pitch); _dl.set(Math.sin(F.yaw) * cp, F.d.fly === "wing" ? Math.sin(F.pitch) : -0.12, Math.cos(F.yaw) * cp);
+    camera.position.copy(F.m.position).addScaledVector(_df, nose).add(_dc.set(0, F.d.fly === "wing" ? 0.75 : 0.35, 0));
+    camera.up.set(Math.sin(F.yaw + Math.PI / 2) * Math.sin(-F.roll) * (reduceMotion ? 0 : 0.6), 1, Math.cos(F.yaw + Math.PI / 2) * Math.sin(-F.roll) * (reduceMotion ? 0 : 0.6)).normalize();
+    _dc.copy(camera.position).addScaledVector(_dl, 10); camera.lookAt(_dc); controls.target.copy(_dc);
+  } else {
+    camera.up.set(0, 1, 0);
+    _dc.copy(F.m.position).addScaledVector(_df, -back).add(_dl.set(0, up, 0));
+    if (F.camPos.distanceTo(_dc) > 40) F.camPos.copy(_dc); else F.camPos.lerp(_dc, 1 - Math.exp(-dt * 4));
+    const gy = groundY(F.camPos.x, F.camPos.z) + 0.6; if (F.camPos.y < gy) F.camPos.y = gy;
+    camera.position.copy(F.camPos); _dc.copy(F.m.position).addScaledVector(_df, 2).add(_dl.set(0, 0.4, 0)); camera.lookAt(_dc); controls.target.copy(_dc);
+  }
+}
+function drCrash(F, why) {
+  if (F.prog) { F.prog.fail = true; }
+  F.crash = 1.6; F.crashes = (F.crashes || 0) + 1; drMsg("💥 " + why + " 重新出發…", 2); kartBeep(140, 0.35, 0.18);
+  if (F.prog) setTimeout(() => drProgDone(false, "飛機撞到了，程式要再檢查一下。"), 1400);
+}
+function drLanded(F) {
+  if (F.mission === "rings" && F.ring >= DR_RINGS.length && !F.done) drRingsFinish(F);
+}
+/* ---------- HUD：搖桿、儀表、姿態儀 ---------- */
+function drHUD() {
+  let h = $("#droneHud"); if (h) h.remove();
+  h = document.createElement("div"); h.id = "droneHud"; h.className = "dhud";
+  const F = DR.F;
+  h.innerHTML = '<div class="dh-top"><div class="dh-name"><small>' + (F.d.cat === "軍用" ? "🛡 軍用．" : "🕊 民用．") + esc(F.d.type) + '</small><b>' + esc(F.d.name) + '</b></div>' +
+    '<button class="dh-btn" id="dhCam" title="切換視角（C）">🎥 <span>追尾</span></button><button class="dh-btn" id="dhSnd" title="引擎聲">🔊</button><button class="dh-btn exit" id="dhExit">✕ 離開</button></div>' +
+    '<div class="dh-inst"><canvas id="dhAtt" width="132" height="132" aria-hidden="true"></canvas><div class="dh-read"><div><small>高度</small><b id="dhAlt">0</b><em>m</em></div><div><small>速度</small><b id="dhSpd">0</b><em>km/h</em></div><div><small>航向</small><b id="dhHdg">000</b><em>°</em></div><div class="dh-bat"><small>電量</small><i><u id="dhBat"></u></i><b id="dhBatN">100</b><em>%</em></div>' + (F.d.fly === "wing" ? '<div class="dh-bat thr"><small>油門</small><i><u id="dhThr"></u></i></div>' : "") + '</div></div>' +
+    '<div class="dh-mis" id="dhMis"' + (F.mission || F.prog ? "" : " hidden") + '></div>' +
+    '<div class="dh-msg" id="dhMsg" role="status" aria-live="polite"></div>' +
+    '<div class="dh-stick L" data-s="L"><i></i><small>' + (F.d.fly === "multi" ? "升降／轉向" : "油門／方向舵") + '</small></div>' +
+    '<div class="dh-stick R" data-s="R"><i></i><small>' + (F.d.fly === "multi" ? "前後／左右" : "俯仰／滾轉") + '</small></div>' +
+    '<p class="dh-help">鍵盤：W/S ' + (F.d.fly === "multi" ? "上升下降" : "油門") + '．A/D 轉向．方向鍵 ' + (F.d.fly === "multi" ? "前後左右" : "俯仰滾轉") + '．C 視角．Esc 離開　<span>也支援遊戲手把</span></p>';
+  $("#app").appendChild(h);
+  $("#dhExit").addEventListener("click", () => endDroneFlight());
+  $("#dhCam").addEventListener("click", drToggleCam);
+  $("#dhSnd").addEventListener("click", () => { DR.mute = !DR.mute; $("#dhSnd").textContent = DR.mute ? "🔇" : "🔊"; drMotor(!DR.mute); });
+  if (DR.mute) $("#dhSnd").textContent = "🔇";
+  $all(".dh-stick", h).forEach(st => {
+    const knob = st.querySelector("i"), key = st.getAttribute("data-s");
+    let pid = null; const R = 46;
+    const set = e => { const r = st.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2; let dx = e.clientX - cx, dy = e.clientY - cy; const l = Math.hypot(dx, dy); if (l > R) { dx *= R / l; dy *= R / l; } knob.style.transform = "translate(" + dx + "px," + dy + "px)"; DR.stick[key] = [dx / R, -dy / R]; };
+    st.addEventListener("pointerdown", e => { pid = e.pointerId; st.setPointerCapture(pid); st.classList.add("on"); set(e); e.preventDefault(); });
+    st.addEventListener("pointermove", e => { if (e.pointerId === pid) set(e); });
+    const up = e => { if (e.pointerId !== pid) return; pid = null; st.classList.remove("on"); knob.style.transform = ""; DR.stick[key] = [0, 0]; };
+    st.addEventListener("pointerup", up); st.addEventListener("pointercancel", up);
+  });
+}
+function drToggleCam() { const F = DR.F; if (!F) return; F.cam = F.cam === "chase" ? "fpv" : "chase"; F.m.visible = F.cam === "chase"; const s = $("#dhCam span"); if (s) s.textContent = F.cam === "chase" ? "追尾" : "第一人稱"; if (F.cam === "chase") F.camPos.copy(camera.position); }
+function drKey(e) {
+  if (!DR.fly) return;
+  const map = { w: "w", s: "s", a: "a", d: "d", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", W: "w", S: "s", A: "a", D: "d" }, k = map[e.key];
+  if (e.type === "keydown" && e.key === "Escape" && $("#modal").hidden) { endDroneFlight(); e.stopPropagation(); return; }
+  if (e.type === "keydown" && (e.key === "c" || e.key === "C") && $("#modal").hidden) { drToggleCam(); return; }
+  if (!k || !$("#modal").hidden) return;
+  DR.keys[k] = e.type === "keydown"; e.preventDefault(); e.stopPropagation();
+}
+let _hudT = 0;
+function drHUDUpdate(F) {
+  if ((_hudT += 1) % 3) return;
+  const agl = Math.max(0, F.pos.y - Math.max(0, groundY(F.pos.x, F.pos.z))), alt = $("#dhAlt"); if (!alt) return;
+  alt.textContent = Math.round(agl * 2); alt.parentNode.classList.toggle("warn", !F.legal);
+  $("#dhSpd").textContent = Math.round(F.vel.length() * 2 * 3.6);
+  let hdg = Math.round(((-F.yaw * 180 / Math.PI) % 360 + 360 + 0) % 360); $("#dhHdg").textContent = String(hdg).padStart(3, "0");
+  $("#dhBat").style.width = F.bat + "%"; $("#dhBat").parentNode.classList.toggle("low", F.bat < 20); $("#dhBatN").textContent = Math.round(F.bat);
+  const th = $("#dhThr"); if (th) th.style.width = Math.round(F.thr * 100) + "%";
+  const cv = $("#dhAtt"); if (cv) drawAtt(cv, F);
+  const mi = $("#dhMis");
+  if (mi && F.mission === "rings") mi.innerHTML = '💍 光環 <b>' + Math.min(F.ring, DR_RINGS.length) + ' / ' + DR_RINGS.length + '</b>　⏱ <b>' + F.rt.toFixed(1) + '</b> 秒' + (drState().best ? '<small>最佳 ' + drState().best.toFixed(1) + ' 秒</small>' : "") + (F.ring >= DR_RINGS.length && !F.done ? '<small>飛回無人機島降落！</small>' : "");
+  if (mi && F.prog) mi.innerHTML = '🧑‍💻 程式執行中：第 <b>' + Math.min(F.prog.i + 1, F.prog.list.length) + ' / ' + F.prog.list.length + '</b> 行　<b>' + esc(F.prog.list[Math.min(F.prog.i, F.prog.list.length - 1)] ? drOpLabel(F.prog.list[Math.min(F.prog.i, F.prog.list.length - 1)]) : "") + '</b>';
+}
+function drawAtt(cv, F) {   // 姿態儀（人工地平線）
+  const x = cv.getContext("2d"), W = cv.width, R = W / 2 - 4, roll = F.d.fly === "wing" ? F.roll : F.roll * 1.6, pit = (F.d.fly === "wing" ? F.pitch : -F.pitch * 1.4);
+  x.clearRect(0, 0, W, W); x.save(); x.translate(W / 2, W / 2);
+  x.beginPath(); x.arc(0, 0, R, 0, Math.PI * 2); x.clip();
+  x.save(); x.rotate(roll); const off = pit * 90;
+  x.fillStyle = "#3B8DDB"; x.fillRect(-W, -W * 2 + off, W * 2, W * 2); x.fillStyle = "#9A6B3E"; x.fillRect(-W, off, W * 2, W * 2);
+  x.strokeStyle = "#fff"; x.lineWidth = 2; x.beginPath(); x.moveTo(-W, off); x.lineTo(W, off); x.stroke();
+  x.lineWidth = 1.2; x.font = "10px sans-serif"; x.fillStyle = "#fff"; x.textAlign = "center";
+  for (let p = -30; p <= 30; p += 10) { if (!p) continue; const y = off - p / 57.3 * 90, w = p % 20 ? 12 : 22; x.beginPath(); x.moveTo(-w, y); x.lineTo(w, y); x.stroke(); }
+  x.restore();
+  x.strokeStyle = "#FFC22E"; x.lineWidth = 3.5; x.beginPath(); x.moveTo(-36, 0); x.lineTo(-12, 0); x.lineTo(-6, 6); x.moveTo(36, 0); x.lineTo(12, 0); x.lineTo(6, 6); x.stroke();
+  x.fillStyle = "#FFC22E"; x.beginPath(); x.arc(0, 0, 3, 0, Math.PI * 2); x.fill();
+  x.restore();
+  x.strokeStyle = "rgba(255,255,255,.85)"; x.lineWidth = 3; x.beginPath(); x.arc(W / 2, W / 2, R, 0, Math.PI * 2); x.stroke();
+  x.save(); x.translate(W / 2, W / 2); x.rotate(roll); x.fillStyle = "#fff"; x.beginPath(); x.moveTo(0, -R + 2); x.lineTo(-5, -R + 11); x.lineTo(5, -R + 11); x.fill(); x.restore();
+}
+function drMsg(t, sec) { const m = $("#dhMsg"); if (!m) return; m.textContent = t; m.classList.toggle("on", !!t); if (DR.F) DR.F.msgT = sec || 0; }
+/* ---------- 引擎聲 ---------- */
+function drMotor(on) {
+  const ctx = sfxAudio();
+  if (DR.snd) { try { DR.snd.o.stop(); DR.snd.o2.stop(); } catch (e) { } DR.snd = null; }
+  if (!on || DR.mute || !ctx || !DR.fly) return;
+  const o = ctx.createOscillator(), o2 = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+  o.type = "sawtooth"; o2.type = "square"; f.type = "lowpass"; f.frequency.value = 900; g.gain.value = 0.0;
+  o.connect(f); o2.connect(f); f.connect(g); g.connect(ctx.destination); o.start(); o2.start(); DR.snd = { o, o2, g, f, ctx };
+}
+function drMotorUpdate(F) {
+  const s = DR.snd; if (!s) return; const t = s.ctx.currentTime;
+  const base = F.d.fly === "multi" ? (F.landed ? 60 : 150 + F.vel.length() * 9 + Math.max(0, F.vel.y) * 20) * (F.d.id === "agri" ? 0.6 : F.d.id === "fpv" ? 1.5 : 1) : (F.d.id === "wing" ? 220 : 90) + F.thr * 110;
+  s.o.frequency.setTargetAtTime(base, t, 0.1); s.o2.frequency.setTargetAtTime(base * 1.005 / 2, t, 0.1);
+  s.g.gain.setTargetAtTime(F.crash > 0 ? 0 : F.landed ? 0.012 : 0.035, t, 0.15);
+}
+function endDroneFlight(silent) {
+  if (!DR.fly) return; const F = DR.F;
+  DR.fly = false; drMotor(false); scene.remove(F.m); DR.list.forEach(o => o.m.visible = true); DR.F = null; DR.keys = {}; DR.stick = { L: [0, 0], R: [0, 0] };
+  removeEventListener("keydown", drKey, true); removeEventListener("keyup", drKey, true);
+  drRingsClear(); camera.up.set(0, 1, 0);
+  const h = $("#droneHud"); if (h) h.remove(); document.body.classList.remove("drone-on");
+  controls.enabled = true;
+  if (!silent) { if (DR.hadPanel && panelMin()) setPanelMin(false, false); focus.flyKey = ""; flyTo(dronePose(), 1.3); if (focus.g === 12) panelDrone(true); }
+}
+/* ---------- 光環挑戰 ---------- */
+function drRingsBuild() {
+  drRingsClear(); const g = new THREE.Group(); scene.add(g); DR.rg = g; DR.rings = [];
+  DR_RINGS.forEach((p, i) => {
+    const r = new THREE.Mesh(new THREE.TorusGeometry(3.0, 0.22, 10, 40), new THREE.MeshBasicMaterial({ color: i ? "#FFC22E" : "#3EE07A", transparent: true, opacity: 0.9, fog: false }));
+    r.position.set(...p); const n = DR_RINGS[(i + 1) % DR_RINGS.length], pv = DR_RINGS[(i + DR_RINGS.length - 1) % DR_RINGS.length]; r.lookAt(new V3(n[0] - pv[0], 0, n[2] - pv[2]).add(r.position)); g.add(r);
+    const gl = glow(i ? "#FFC22E" : "#3EE07A", 2.4); gl.position.copy(r.position); g.add(gl); DR.rings.push({ r, gl });
+  });
+  const ar = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.55, 10), new THREE.MeshBasicMaterial({ color: "#3EE07A", fog: false })); ar.geometry.rotateX(Math.PI / 2); g.add(ar); DR.arrow = ar;
+  drRingsReset();
+}
+function drRingsReset() { const F = DR.F; if (!F) return; F.ring = 0; F.rt = 0; F.done = false; F.started = false; (DR.rings || []).forEach((o, i) => { o.r.visible = o.gl.visible = true; o.r.material.color.set(i ? "#FFC22E" : "#3EE07A"); o.gl.material.color.set(i ? "#FFC22E" : "#3EE07A"); }); }
+function drRingsClear() { if (DR.rg) { scene.remove(DR.rg); DR.rg = null; DR.rings = null; DR.arrow = null; } }
+function drRingsStep(F, dt) {
+  if (!DR.rings) return;
+  if (!F.landed) F.started = true;
+  if (F.started && !F.done) F.rt += dt;
+  const n = F.ring;
+  if (n < DR_RINGS.length) {
+    const o = DR.rings[n]; o.r.rotation.z += dt * 0.6;
+    if (F.pos.distanceTo(o.r.position) < 3.1) {
+      o.r.visible = o.gl.visible = false; F.ring++; playChime(); drMsg("💍 " + F.ring + " / " + DR_RINGS.length, 1.2);
+      const nx = DR.rings[F.ring]; if (nx) { nx.r.material.color.set("#3EE07A"); nx.gl.material.color.set("#3EE07A"); } else drMsg(F.d.fly === "multi" ? "全部通過！飛回無人機島降落。" : "全部通過！飛回無人機島上空就完成。", 3);
+    }
+  } else if (!F.done) {
+    const home = Math.hypot(F.pos.x - DPOS.x, F.pos.z - DPOS.z) < DRR;
+    if (home && (F.d.fly === "wing" || F.landed)) drRingsFinish(F);
+  }
+  const tgt = n < DR_RINGS.length ? DR.rings[n].r.position : (DR.home || (DR.home = new V3(DPOS.x, 2, DPOS.z)));
+  DR.arrow.visible = !F.done && F.cam === "chase";
+  _dl.copy(tgt).sub(F.pos).normalize(); DR.arrow.position.copy(F.pos).addScaledVector(_dl, F.d.fly === "wing" ? 3.2 : 1.8).add(_dc.set(0, F.d.fly === "wing" ? 0.9 : 0.55, 0)); DR.arrow.lookAt(tgt);
+}
+function drRingsFinish(F) {
+  F.done = true; const s = drState(), first = !s.rings, rec = !s.best || F.rt < s.best, wasLic = droneLic();
+  drSave({ rings: true, best: rec ? F.rt : s.best, bestBy: rec ? F.d.name : s.bestBy });
+  playCheer(rec); confetti();
+  drMsg("🏁 完成！" + F.rt.toFixed(1) + " 秒" + (rec ? "　新紀錄！" : ""), 5);
+  toast("💍 光環挑戰完成：" + F.rt.toFixed(1) + " 秒" + (rec ? "（新紀錄）" : ""));
+  if (!wasLic && droneLic()) setTimeout(drLicGranted, 1800);
+  updateCertCount();
+}
+/* ---------- 法規小教室 ---------- */
+function openDroneQuiz() {
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  let i = 0, score = 0;
+  const render = () => {
+    if (i >= DR_QUIZ.length) {
+      const pass = score >= 4, wasLic = droneLic(); if (pass) drSave({ quiz: true });
+      openModal('<div class="npc-card" style="--s:#2F7FD8"><button class="m-close" aria-label="關閉">×</button><div class="npc-head"><div class="npc-ava drone">📝</div><div><small>無人機島．法規小教室</small><h2>' + (pass ? "通過！" : "再試一次") + '</h2></div></div>' +
+        '<div class="npc-bubble">答對 <b>' + score + ' / ' + DR_QUIZ.length + '</b> 題。' + (pass ? "你已經懂得安全飛行的規則了！" : "答對 4 題以上就通過，再挑戰一次吧！") + '</div>' +
+        '<p class="small">規定以交通部民用航空局最新公告為準。真的要飛之前，請和老師或家長一起查「民航局無人機專區」。</p>' +
+        '<div class="row npc-act">' + (pass ? '<button class="btn" id="dqOk">好</button>' : '<button class="btn" id="dqRe">再考一次</button>') + '</div></div>', "npc-sheet");
+      if (pass) { playCheer(false); $("#dqOk").addEventListener("click", () => { closeModal(); if (focus.g === 12) panelDrone(true); if (!wasLic && droneLic()) drLicGranted(); }); }
+      else $("#dqRe").addEventListener("click", () => { i = 0; score = 0; render(); });
+      return;
+    }
+    const q = DR_QUIZ[i];
+    openModal('<div class="npc-card" style="--s:#2F7FD8"><button class="m-close" aria-label="關閉">×</button><div class="npc-head"><div class="npc-ava drone">📝</div><div><small>法規小教室．第 ' + (i + 1) + ' / ' + DR_QUIZ.length + ' 題</small><h2>' + esc(q.q) + '</h2></div></div>' +
+      '<div class="dq-opts">' + q.o.map((o, k) => '<button class="tr-row dq-o" data-k="' + k + '"><b>' + "ABCD"[k] + '</b><span>' + esc(o) + '</span></button>').join("") + '</div><div id="dqWhy"></div></div>', "npc-sheet");
+    speak(q.q);
+    $all(".dq-o").forEach(b => b.addEventListener("click", () => {
+      if ($("#dqWhy").innerHTML) return; const k = +b.getAttribute("data-k"), ok = k === q.a; if (ok) { score++; playChime(); }
+      b.classList.add(ok ? "ok" : "no"); if (!ok) $all(".dq-o")[q.a].classList.add("ok");
+      $("#dqWhy").innerHTML = '<p class="npc-tip">' + (ok ? "✅ 答對了！" : "❌ 正確答案是 " + "ABCD"[q.a] + "。") + esc(q.why) + '</p><div class="row npc-act"><button class="btn" id="dqNext">' + (i + 1 < DR_QUIZ.length ? "下一題" : "看結果") + '</button></div>';
+      $("#dqNext").addEventListener("click", () => { i++; render(); });
+    }));
+  };
+  render();
+}
+/* ---------- 執照 ---------- */
+function drLicGranted() { playCheer(true); confetti(); toast("🪪 恭喜拿到嘉蘭無人機飛行員證！獲得 1 顆校寵扭蛋！"); updateCertCount(); openDroneLicense(); if (focus.g === 12) panelDrone(true); }
+function openDroneLicense() {
+  const s = drState(), who = store("certWho") || {}; modalBack = (location.hash || "#home").replace(/^#/, "");
+  openModal('<div class="dr-lic-card"><button class="m-close" aria-label="關閉">×</button><div class="dl-head"><span>🛸</span><div><small>JIALAN DRONE PILOT LICENSE</small><b>嘉蘭無人機飛行員證</b></div></div>' +
+    '<div class="dl-body"><div class="dl-photo">🧑‍✈️</div><dl><dt>飛行員</dt><dd>' + esc(who.name || "嘉蘭小飛行員") + '</dd><dt>核發</dt><dd>' + todayKey() + '</dd><dt>光環紀錄</dt><dd>' + (s.best ? s.best.toFixed(1) + " 秒（" + esc(s.bestBy || "") + "）" : "—") + '</dd><dt>程式飛行</dt><dd>' + (s.code ? "✅ 通過" : "尚未挑戰") + '</dd></dl></div>' +
+    '<p class="dl-note">本證為嘉蘭樂學島學習紀念，不是民航局的操作證。真的飛行請遵守民航法規。</p></div>', "npc-sheet");
+}
+/* ---------- 程式飛行（資訊科技） ---------- */
+const DR_OPS = [["takeoff", "🛫 起飛", "m", [4, 6, 10]], ["fwd", "⬆️ 前進", "m", [4, 10, 20]], ["back", "⬇️ 後退", "m", [4, 10, 20]], ["left", "⬅️ 左移", "m", [4, 10, 20]], ["right", "➡️ 右移", "m", [4, 10, 20]], ["up", "⏫ 上升", "m", [4, 10]], ["down", "⏬ 下降", "m", [4, 10]], ["tl", "↪️ 左轉", "°", [90, 45]], ["tr", "↩️ 右轉", "°", [90, 45]], ["land", "🛬 降落", "", []]];
+const drOpLabel = s => { const o = DR_OPS.find(x => x[0] === s.op); return o[1] + (o[2] ? " " + s.v + " " + (o[2] === "m" ? "公尺" : "度") : ""); };
+const DR_SQUARE = [{ op: "takeoff", v: 6 }, { op: "fwd", v: 10 }, { op: "tr", v: 90 }, { op: "fwd", v: 10 }, { op: "tr", v: 90 }, { op: "fwd", v: 10 }, { op: "tr", v: 90 }, { op: "fwd", v: 10 }, { op: "land", v: 0 }];
+function openDroneCode() {
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  DR.code = DR.code || (drState().prog || []).slice();
+  const render = () => {
+    const L = DR.code;
+    openModal('<div class="npc-card dr-code" style="--s:#2F7FD8"><button class="m-close" aria-label="關閉">×</button><div class="npc-head"><div class="npc-ava drone">🧑‍💻</div><div><small>無人機島．資訊科技</small><h2>程式飛行工作台</h2></div></div>' +
+      '<div class="npc-bubble"><b>挑戰：</b>寫一段程式，讓空拍機<b>起飛 → 飛一個正方形 → 回到起點降落</b>。想一想：要重複幾次「前進、右轉」？</div>' +
+      '<div class="dc-pal">' + DR_OPS.map(o => '<div class="dc-op"><span>' + o[1] + '</span>' + (o[3].length ? o[3].map(v => '<button data-add="' + o[0] + '" data-v="' + v + '">' + v + (o[2] === "m" ? "m" : "°") + '</button>').join("") : '<button data-add="' + o[0] + '" data-v="0">＋</button>') + '</div>').join("") + '</div>' +
+      '<ol class="dc-prog">' + (L.length ? L.map((s, i) => '<li><span>' + drOpLabel(s) + '</span><button data-del="' + i + '" aria-label="刪除">×</button></li>').join("") : '<li class="empty">點上面的指令，把程式一行一行加進來</li>') + '</ol>' +
+      '<div class="row npc-act"><button class="btn ghost" id="dcClr">清空</button><button class="btn ghost" id="dcHint">💡 提示</button><button class="btn" id="dcRun"' + (L.length ? "" : " disabled") + '>▶ 執行程式</button></div></div>', "npc-sheet");
+    $all("[data-add]").forEach(b => b.addEventListener("click", () => { if (L.length >= 24) return toast("程式最多 24 行喔！"); L.push({ op: b.getAttribute("data-add"), v: +b.getAttribute("data-v") }); render(); }));
+    $all("[data-del]").forEach(b => b.addEventListener("click", () => { L.splice(+b.getAttribute("data-del"), 1); render(); }));
+    $("#dcClr").addEventListener("click", () => { L.length = 0; render(); });
+    $("#dcHint").addEventListener("click", () => toast("正方形有 4 個邊、4 個角：起飛之後，「前進 10 公尺、右轉 90 度」做 4 次，最後降落。", true));
+    $("#dcRun").addEventListener("click", () => { drSave({ prog: L.slice() }); runDroneProgram(L.slice()); });
+  };
+  render();
+}
+function runDroneProgram(list) {
+  startDroneFlight("aerial", "");
+  const F = DR.F; if (!F) return;
+  F.prog = { list, i: 0, st: null, fail: false, turn: 0 };
+  drSpawn(F); F.home = F.pos.clone(); F.homeYaw = F.yaw;
+  const mi = $("#dhMis"); if (mi) mi.hidden = false;
+  $all(".dh-stick").forEach(s => s.style.display = "none");
+  drMsg("🧑‍💻 程式開始執行！", 2);
+}
+function drAuto(F, dt) {   // 依程式設定目標點，自動飛過去
+  const G = F.prog, I = { thr: 0, yaw: 0, pit: 0, rol: 0 };
+  if (G.fail) return I;
+  if (G.i >= G.list.length) { if (!G.end) { G.end = true; setTimeout(() => drProgCheck(F), 900); } return I; }
+  const s = G.list[G.i], u = (s.v || 0) / 2;
+  if (!G.st) {
+    const f = new V3(Math.sin(F.yaw), 0, Math.cos(F.yaw)), r = new V3(-Math.cos(F.yaw), 0, Math.sin(F.yaw)), p = F.pos.clone();
+    G.st = { yaw: F.yaw, to: p };
+    if (s.op === "takeoff") p.y = Math.max(p.y, groundY(p.x, p.z) + u);
+    else if (s.op === "fwd") p.addScaledVector(f, u); else if (s.op === "back") p.addScaledVector(f, -u);
+    else if (s.op === "left") p.addScaledVector(r, -u); else if (s.op === "right") p.addScaledVector(r, u);
+    else if (s.op === "up") p.y += u; else if (s.op === "down") p.y -= u;
+    else if (s.op === "tl") { G.st.yaw = F.yaw + s.v * Math.PI / 180; G.turn += s.v; } else if (s.op === "tr") { G.st.yaw = F.yaw - s.v * Math.PI / 180; G.turn -= s.v; }
+    else if (s.op === "land") p.y = groundY(p.x, p.z) + 0.12;
+    if (F.landed && s.op !== "takeoff") { G.fail = true; setTimeout(() => drProgDone(false, "飛機還沒起飛！第一行要先「起飛」。"), 300); return I; }
+    if (s.op === "takeoff") F.landed = false;
+  }
+  const T = G.st.to, dy = G.st.yaw - F.yaw;
+  if (Math.abs(dy) > 0.01) { F.yaw += Math.sign(dy) * Math.min(Math.abs(dy), dt * 1.6); I.yaw = -Math.sign(dy) * 0.0001; return I; }
+  const fw = new V3(Math.sin(F.yaw), 0, Math.cos(F.yaw)), rt = new V3(-Math.cos(F.yaw), 0, Math.sin(F.yaw)), dv = T.clone().sub(F.pos);
+  const df = dv.dot(fw), dr = dv.dot(rt), P = F.P;
+  I.pit = clamp(df / 3, -0.6, 0.6); I.rol = clamp(dr / 3, -0.6, 0.6); I.thr = clamp(dv.y / 1.5, -0.8, 0.8);
+  if (s.op === "land" && dv.y > -0.05) I.thr = -0.3;
+  if (dv.length() < 0.25 || (s.op === "land" && F.landed)) { G.i++; G.st = null; }
+  void P; return I;
+}
+function drProgCheck(F) {
+  if (!DR.F || DR.F !== F) return;
+  const G = F.prog, d = Math.hypot(F.pos.x - F.home.x, F.pos.z - F.home.z), moves = G.list.filter(s => /fwd|back|left|right/.test(s.op)).length, turns = Math.abs(G.turn);
+  const ok = F.landed && d < 1.2 && moves >= 4 && turns >= 270;
+  drProgDone(ok, ok ? "完美！無人機飛了一個正方形，回到起點降落。" : !F.landed ? "程式最後要記得「降落」喔！" : d >= 1.2 ? "飛機沒有回到起點，看看每一邊的長度和轉彎角度一樣嗎？" : "這次有回到起點，但還不是正方形，試試看「前進、右轉 90 度」做 4 次。");
+}
+function drProgDone(ok, msg) {
+  if (!DR.F) return; const wasCode = drState().code;
+  if (ok) { drSave({ code: true }); playCheer(!wasCode); confetti(); }
+  modalBack = "drone";
+  openModal('<div class="npc-card" style="--s:#2F7FD8"><button class="m-close" aria-label="關閉">×</button><div class="npc-head"><div class="npc-ava drone">' + (ok ? "🏅" : "🔧") + '</div><div><small>程式飛行</small><h2>' + (ok ? "挑戰成功！" : "程式除錯時間") + '</h2></div></div>' +
+    '<div class="npc-bubble">' + esc(msg) + (ok ? " 燈光秀的每一台無人機，也是靠這樣的程式飛行的！" : " 工程師也要一直修改程式（除錯），才會成功。") + '</div>' +
+    '<div class="row npc-act"><button class="btn ghost" id="dpBack">回到工作台</button><button class="btn" id="dpExit">離開</button></div></div>', "npc-sheet");
+  $("#dpBack").addEventListener("click", () => { endDroneFlight(true); openDroneCode(); });
+  $("#dpExit").addEventListener("click", () => { closeModal(); endDroneFlight(); });
+}
+function printDroneSheet() {
+  let pa = $("#printArea"); if (!pa) { pa = document.createElement("div"); pa.id = "printArea"; document.body.appendChild(pa); }
+  pa.innerHTML = '<div class="ws"><h1>嘉蘭樂學島．無人機島　戶外教育學習單</h1><p>班級：＿＿＿＿　座號：＿＿＿　姓名：＿＿＿＿＿＿＿＿　日期：＿＿＿＿＿＿</p>' +
+    '<table><thead><tr><th>無人機</th><th>民用／軍用</th><th>種類</th><th>它可以用來做什麼？</th></tr></thead><tbody>' +
+    DRONES.map(d => '<tr><td>' + esc(d.name) + '</td><td></td><td></td><td></td></tr>').join("") + '</tbody></table>' +
+    '<h2>想一想</h2><ol><li>多旋翼和固定翼無人機，各有什麼優點和缺點？</li><li>寫出三條飛無人機要遵守的規定。</li><li>畫出讓無人機飛「正方形」的程式（用起飛、前進、右轉、降落）。</li><li>無人機可以怎麼幫助我們的部落或學校？軍用無人機又讓你想到什麼問題？</li></ol>' +
+    '<p class="ws-note">飛行規定以交通部民用航空局最新公告為準。</p></div>';
+  document.body.classList.add("printing");
+  const done = () => { document.body.classList.remove("printing"); removeEventListener("afterprint", done); };
+  addEventListener("afterprint", done); setTimeout(() => window.print(), 150);
+}
+
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -5321,6 +6030,7 @@ function refreshOpenState() {
     else if (focus.g === 9) panelPark(true);
     else if (focus.g === 10) panelKart(true);
     else if (focus.g === 11) panelZoo(true);
+    else if (focus.g === 12) panelDrone(true);
     else if (focus.g) panelIsland(focus.g);
     else if (focus.g === null) panelHome();
   }
@@ -5430,6 +6140,7 @@ function go(h) { if (location.hash === "#" + h) route(); else location.hash = "#
 function route() {
   const h = (location.hash || "").replace(/^#/, "") || "home";
   let m;
+  if (DR.fly && h !== "drone") endDroneFlight(true);
   if (h === "teacher") { openTeacher(); return; }
   if (h === "cabinet") { openCabinet(); return; }
   if (h === "list") { openList(); return; }
@@ -5445,7 +6156,9 @@ function route() {
   if (h === "pets") { openPets(); return; }
   if (h === "puzzle") { openPuzzle(); return; }
   if (h === "cards") { openCardBook(); return; }
-  if (h === "zoo") { if (panelMin()) setPanelMin(false, false); focus.g = 11; focus.key = null; panelZoo(); fly("zoo", zooPose); }
+  if (h === "drone" && DR.fly) return;
+  if (h === "drone") { if (panelMin()) setPanelMin(false, false); focus.g = 12; focus.key = null; panelDrone(); fly("drone", dronePose); }
+  else if (h === "zoo") { if (panelMin()) setPanelMin(false, false); focus.g = 11; focus.key = null; panelZoo(); fly("zoo", zooPose); }
   else if (h === "kart") { if (panelMin()) setPanelMin(false, false); focus.g = 10; focus.key = null; panelKart(); fly("kart", kartPose); }
   else if (h === "park") { if (panelMin()) setPanelMin(false, false); focus.g = 9; focus.key = null; panelPark(); fly("park", parkPose); }
   else
