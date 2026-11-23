@@ -1923,6 +1923,7 @@ function labelMode(L) {
   if (L.kind === "fest") return (focus.g === 0 || focus.g === null) ? "fixed" : "hide";
   if (L.kind === "animal") return focus.g === 11 ? "fixed" : "hide";
   if (L.kind === "drone") return focus.g === 12 ? "fixed" : "hide";
+  if (L.kind === "richhost") return focus.g === 13 ? "fixed" : "hide";
   if (L.kind === "park") return focus.g === 9 && !PARK.ride && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "ferry") return (focus.g === 9 || focus.g === 7 || focus.g === null) && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "station") return focus.g === 8 && !RIDE.on ? "fixed" : "hide";
@@ -1954,6 +1955,8 @@ function renderLabel(L, mode) {
     if (s) L.el.style.setProperty("--s", s.color);
     L.el.setAttribute("aria-label", host ? "島主" + d.name + "，點我問問題" : d.name + "，" + GRADES[d.g - 1].name + s.name + "助教");
     L.el.innerHTML = host ? '<i>主</i><span>島主．' + esc(d.name) + '</span>' : '<i>' + esc(s.name[0]) + '</i><span>' + esc(d.name) + '</span>';
+  } else if (L.kind === "richhost") {
+    L.el.className = "lbl npc host"; L.el.style.setProperty("--s", "#7A4FC2"); L.el.innerHTML = '<i>🎩</i><span>島主阿金．挑戰我！</span>';
   } else if (L.kind === "drone") {
     const dd = d.d; L.el.className = "lbl npc station"; L.el.style.setProperty("--s", dd.cat === "軍用" ? "#4E5A68" : "#2F7FD8");
     L.el.innerHTML = '<i>' + (dd.cat === "軍用" ? "🛡" : dd.fly === "wing" ? "✈️" : "🛸") + '</i><span>' + esc(dd.name) + '</span>';
@@ -1988,10 +1991,10 @@ function renderLabel(L, mode) {
 const _v = new V3();
 function updateLabels() {
   const W = innerWidth, H = innerHeight;
-  if (FW.active || PARK.ride || PARK.boarded || DR.fly) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
+  if (FW.active || PARK.ride || PARK.boarded || DR.fly || MG.on) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
   labels.forEach(L => {
     const m = labelMode(L); if (m !== L.mode) renderLabel(L, m);
-    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry", "animal", "drone"].includes(L.kind)) && L.mode !== "hide";
+    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry", "animal", "drone", "richhost"].includes(L.kind)) && L.mode !== "hide";
     if (L.kind === "grade" && L.data.g && focus.g === L.data.g && focus.key) show = false;
     if (!show) { L.el.style.visibility = "hidden"; return; }
     L.obj.getWorldPosition(_v); _v.y += L.offY; _v.project(camera);
@@ -2025,7 +2028,7 @@ function pickAt(cx, cy) {
   ray.setFromCamera(ptr, camera);
   const hits = ray.intersectObjects(pickables, false);
   if (!hits.length) return null;
-  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "animal", "drone", "bird", "mascot", "building"];
+  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "animal", "drone", "richHost", "richCell", "bird", "mascot", "building"];
   for (const t of pri) { const h = hits.find(x => x.object.userData.type === t); if (h) return h.object.userData; }
   return hits[0].object.userData;
 }
@@ -2044,6 +2047,9 @@ function onPick(u) {
   if (u.type === "zoo") return go("zoo");
   if (u.type === "drone") return openDrone(u.id);
   if (u.type === "droneIsle") return go("drone");
+  if (u.type === "richIsle") return MG.on ? null : go("rich");
+  if (u.type === "richHost") return MG.on ? null : richSetup("host");
+  if (u.type === "richCell") { const c = RICH_CELLS[u.i], o = MG.on && MG.g.own[u.i]; return toast(c.n + (c.p ? "：地價 $" + c.p + (o ? "，屬於 " + MG.g.teams[o.t].e + MG.g.teams[o.t].n + "（" + RICH_LV[o.lv] + "，過路費 $" + richRent(u.i) + "）" : "") : c.d ? "：" + c.d : "")); }
   if (u.type === "bird") return foundBird(u.id);
   if (u.type === "amb") { toast(AMB_INFO[u.kind], true); return; }
   if (u.type === "mascot") { speak("嗨！我是台灣藍鵲，歡迎來到嘉蘭樂學島！島上還躲著我的十個朋友，你找得到嗎？", { force: true }); toast("嗨！我是台灣藍鵲，島上還躲著我的十個朋友，你找得到嗎？"); return; }
@@ -2076,7 +2082,7 @@ function initWorld() {
   controls = new OrbitControls(camera, canvas);
   controls.target.copy(v.target); controls.enableDamping = true; controls.dampingFactor = 0.08;
   controls.minDistance = 8; controls.maxDistance = 300; controls.maxPolarAngle = 1.32; controls.screenSpacePanning = false;
-  controls.addEventListener("change", () => { const t = controls.target; if (t.length() > 80) t.setLength(80); if (t.y < -2) t.y = -2; if (t.y > 12) t.y = 12; });
+  controls.addEventListener("change", () => { const t = controls.target; if (t.length() > 110) t.setLength(110); if (t.y < -2) t.y = -2; if (t.y > 12) t.y = 12; });
   winMat = new THREE.MeshStandardMaterial({ color: "#7896AA", emissive: "#FFC45A", emissiveIntensity: 0, roughness: 0.25, metalness: 0.2 });
   hemi = new THREE.HemisphereLight("#F4F7EE", "#B9CFC4", 1.2); scene.add(hemi);
   ambient = new THREE.AmbientLight("#FFFFFF", 0.25); scene.add(ambient);
@@ -2085,7 +2091,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine(); makeZoo(); makeDroneIsland();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine(); makeZoo(); makeDroneIsland(); makeRichIsland();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2099,7 +2105,7 @@ function initWorld() {
   renderer.setAnimationLoop(() => {
     if (KG.on) { last = performance.now(); return; }   // 玩卡丁車時暫停 3D 畫面，省電又順暢
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now; time += ui.paused ? 0 : dt;
-    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded && !DR.fly) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt); stepZoo(dt, time); stepDroneIsland(dt, time);
+    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded && !DR.fly) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt); stepZoo(dt, time); stepDroneIsland(dt, time); stepRich(dt, time);
     scene.children.forEach(o => { if (o.userData.follow) o.position.copy(camera.position); });
     if (sunMesh.userData.dir) sunMesh.position.copy(camera.position).addScaledVector(sunMesh.userData.dir, 600);
     if (moonSprite.userData.dir) moonSprite.position.copy(camera.position).addScaledVector(moonSprite.userData.dir, 580);
@@ -2610,6 +2616,7 @@ function bagItems() {
     ["🎆", "放煙火", fwTokens() + " 次", () => openFireworks()],
     ["⛰", "大武山拼圖", questDone().length + " / 9 片", () => go("puzzle")],
     ["🛂", "動物護照", Object.keys(zooSeen()).length + " / " + ZOO.length + " 章", () => go("zoo")],
+    ["🎲", "富翁島戰績", richState().games ? "玩了 " + richState().games + " 場" + (richState().beat ? "．打敗過島主" : "") : "還沒玩過", () => go("rich")],
     ["🪪", "無人機飛行員證", droneLic() ? "已取得" : "未取得", () => droneLic() ? openDroneLicense() : go("drone")],
     ["🥚", "校寵扭蛋", capsules() + " 顆", () => go("gacha")],
     ["👜", "校寵蒐集袋", Object.keys(petBag().owned).length + " 種", () => go("pets")],
@@ -3118,6 +3125,7 @@ const HOST_FAQ = [
   { q: "今晚有流星雨嗎？", k: ["流星", "星星", "天文", "許願"], a: "", act: ["", "meteor"] },
   { q: "小火車怎麼搭？", k: ["火車", "小火車", "搭車", "車站", "坐車"], a: "環島小火車每天 06:00 到 22:00 繞著群島跑，停靠 8 個車站。點畫面上的「🚃 環島小火車」可以看即時動態，還能直接上車搭一圈！", act: ["看小火車即時動態", "train"] },
   { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。打開左下角的 🎒 背包，點「放煙火」，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
+  { q: "富翁島在哪裡？", k: ["大富翁", "富翁", "骰子", "買地", "島主阿金", "阿金", "對戰", "桌遊"], a: "嘉蘭富翁島在一年級島的外海，走金色拱橋就能到！整座島就是一張立體富翁遊戲棋盤，24 格都是臺東的好地方。可以 2–4 隊組隊對戰，也可以挑戰島主阿金。停在空地要先答對學習題才能買地喔！第一次打敗島主，還送 1 顆校寵扭蛋。", act: ["去富翁島", "rich"] },
   { q: "無人機島在哪裡？", k: ["無人機", "空拍", "飛機", "空拍機", "飛行", "執照", "燈光秀", "程式飛行"], a: "無人機島在二年級島的外海，走藍色步道橋就能到。機庫裡有八款無人機：空拍機、穿越機、植保機、物流機、垂直起降固定翼，還有軍用的長航時偵察機和隱形飛翼機。可以坐上駕駛座試飛、挑戰光環、寫程式讓無人機飛正方形；考過法規小教室又完成光環挑戰，就能拿到飛行員證和 1 顆校寵扭蛋！晚上還有無人機燈光秀喔。", act: ["去無人機島", "drone"] },
   { q: "動物島在哪裡？", k: ["動物", "動物島", "動物園", "貓熊", "企鵝", "長頸鹿", "袋鼠", "護照", "保育"], a: "世界動物島在四年級島的外海，走步道橋就能到。島上分成極地、溫帶與高山森林、熱帶雨林、熱帶草原、沙漠與澳洲五個氣候區，有 14 種動物。點每一隻動物認識牠，就能蓋動物護照章，集滿送 2 顆校寵扭蛋！", act: ["去動物島", "zoo"] },
   { q: "大武山怎麼解鎖？", k: ["大武山", "拼圖", "解謎", "碎片", "秘密"], a: "大武山的入口被分成九片拼圖，藏在樂學島各個地方：卡丁車、藍鵲、證書、節慶、流星、小火車、樂園、魔法卡和校寵。集滿九片，大武山就會打開！", act: ["看拼圖進度", "puzzle"] },
@@ -4861,7 +4869,7 @@ const PET_RAR = { N: ["普通", "#9AA3AD", 55], R: ["稀有", "#4AA8FF", 30], SR
 const petById = id => PETS.find(p => p.id === id) || (id === "king" ? PET_LEGEND : null);
 const petBag = () => store("pets") || { owned: {}, used: 0, order: [] };
 function visitDays() { const d = store("days") || []; const k = todayKey(); if (d.indexOf(k) < 0) { d.push(k); store("days", d.slice(-400)); } return d.length; }
-const capsules = () => { const b = petBag(); return Math.max(0, 1 + visitDays() + Object.keys(store("certs") || {}).length + questDone().length + (zooDone() ? 2 : 0) + (droneLic() ? 1 : 0) - (b.used || 0)); };
+const capsules = () => { const b = petBag(); return Math.max(0, 1 + visitDays() + Object.keys(store("certs") || {}).length + questDone().length + (zooDone() ? 2 : 0) + (droneLic() ? 1 : 0) + (richState().beat ? 1 : 0) - (b.used || 0)); };
 function rollPet() {
   let r = Math.random() * 100, rar = "N";
   for (const k of ["SSR", "SR", "R", "N"]) { if ((r -= PET_RAR[k][2]) <= 0 || k === "N") { rar = k; break; } }
@@ -5598,7 +5606,7 @@ function pickDroneFor(mission) {
 let DGROUND = null;
 function groundCircles() {
   if (DGROUND) return DGROUND;
-  const c = [[0, 0, R_HUB], [DPOS.x, DPOS.z, DRR], [84, -24, 13.5], [-84, 6, 11], [80, 34, 12]];
+  const c = [[0, 0, R_HUB], [DPOS.x, DPOS.z, DRR], [RPOS.x, RPOS.z, RR], [84, -24, 13.5], [-84, 6, 11], [80, 34, 12]];
   ANG.forEach(a => { const r = a * Math.PI / 180, gp = new V3(Math.cos(r) * D, 0, Math.sin(r) * D), th0 = Math.atan2(-gp.x, -gp.z); c.push([gp.x, gp.z, RM + 0.6]);
     for (let k = 0; k < SUBJECTS.length; k++) { const th = th0 + (36 + k * 32) * Math.PI / 180; c.push([gp.x + Math.sin(th) * RI, gp.z + Math.cos(th) * RI, RS]); } });
   return (DGROUND = c);
@@ -5971,6 +5979,458 @@ function printDroneSheet() {
   addEventListener("afterprint", done); setTimeout(() => window.print(), 150);
 }
 
+/* =====================================================================
+   🎲 嘉蘭富翁島（衛星島）：整座島就是立體棋盤
+   組隊對戰（2–4 隊同一台裝置輪流）或挑戰島主阿金；落在空地要先答對學習題才能買
+   ===================================================================== */
+const RPOS = new V3(-86, 0, 36), RR = 13.6, RC = 2.3, RH = RC * 3;
+const RICH_CELLS = [
+  { k: "start", n: "起點", ic: "🏁", d: "經過或停在這裡，領 200 元" },
+  { k: "lot", n: "嘉蘭部落", g: 0, p: 60 }, { k: "lot", n: "金崙溫泉", g: 0, p: 70 },
+  { k: "learn", n: "學習卡", ic: "📚" },
+  { k: "lot", n: "太麻里金針山", g: 1, p: 100 }, { k: "lot", n: "多良車站", g: 1, p: 120 },
+  { k: "rest", n: "小米田", ic: "🌾", d: "幫忙收小米，休息一回合" },
+  { k: "lot", n: "知本森林遊樂區", g: 2, p: 140 }, { k: "lot", n: "史前文化博物館", g: 2, p: 160 },
+  { k: "chance", n: "機會", ic: "🍀" },
+  { k: "lot", n: "臺東森林公園", g: 3, p: 180 }, { k: "lot", n: "鐵花村", g: 3, p: 200 },
+  { k: "fest", n: "豐年祭廣場", ic: "🎉", d: "大家一起分享，領 100 元" },
+  { k: "lot", n: "小野柳", g: 4, p: 220 }, { k: "lot", n: "加路蘭海岸", g: 4, p: 240 },
+  { k: "learn", n: "學習卡", ic: "📚" },
+  { k: "lot", n: "三仙台", g: 5, p: 260 }, { k: "lot", n: "鹿野高台", g: 5, p: 280 },
+  { k: "train", n: "南迴小火車", ic: "🚂", d: "搭火車回到起點，領 200 元" },
+  { k: "lot", n: "初鹿牧場", g: 6, p: 300 }, { k: "lot", n: "池上伯朗大道", g: 6, p: 320 },
+  { k: "chance", n: "機會", ic: "🍀" },
+  { k: "lot", n: "綠島", g: 7, p: 360 }, { k: "lot", n: "蘭嶼", g: 7, p: 400 }
+];
+const RICH_GCOL = ["#8B5A3C", "#F08C2E", "#E36BA8", "#D8443A", "#E8C02E", "#3FA55B", "#2BA6A0", "#2F6FC8"];
+const RICH_TEAMS = [{ n: "老鷹隊", e: "🦅", c: "#D8443A" }, { n: "山豬隊", e: "🐗", c: "#2F6FC8" }, { n: "飛魚隊", e: "🐟", c: "#2BA67A" }, { n: "小米隊", e: "🌾", c: "#E8A21E" }];
+const RICH_HOST = { n: "島主阿金", e: "🎩", c: "#7A4FC2", ai: true };
+const RICH_LV = ["空地", "小屋", "石板屋", "部落會所"];
+const RICH_START = 1500, RICH_PASS = 200;
+const RICH_Q = {
+  low: [
+    ["7 + 8 = ？", ["13", "14", "15", "16"], 2], ["20 − 9 = ？", ["9", "11", "12", "13"], 1], ["3 × 4 = ？", ["7", "12", "9", "14"], 1],
+    ["100 − 45 = ？", ["45", "55", "65", "155"], 1], ["5 個 10 元硬幣是多少元？", ["15 元", "50 元", "500 元", "105 元"], 1],
+    ["一星期有幾天？", ["5 天", "6 天", "7 天", "8 天"], 2], ["一年有幾個月？", ["10 個月", "12 個月", "7 個月", "24 個月"], 1],
+    ["時鐘長針指著 12、短針指著 3，是幾點？", ["12 點", "3 點", "9 點", "6 點"], 1],
+    ["昆蟲有幾隻腳？", ["4 隻", "6 隻", "8 隻", "10 隻"], 1], ["青蛙小時候叫什麼？", ["毛毛蟲", "蝌蚪", "孑孓", "小魚"], 1],
+    ["哪一種動物會生蛋？", ["狗", "牛", "雞", "貓"], 2], ["過馬路要走哪裡？", ["斑馬線", "車道中間", "停車格", "哪裡都可以"], 0],
+    ["發生火災或要叫救護車，要打哪個電話？", ["110", "119", "165", "113"], 1],
+    ["地震來的時候，在教室要怎麼做？", ["馬上跑出去", "趴下、掩護、穩住", "搭電梯", "站在窗戶旁邊"], 1],
+    ["喝完的寶特瓶要丟到哪裡？", ["一般垃圾", "資源回收", "廚餘桶", "水溝"], 1],
+    ["太麻里金針山的花季，滿山開的是什麼花？", ["金針花", "櫻花", "向日葵", "油菜花"], 0],
+    ["原住民的豐年祭（收穫祭）最重要的傳統作物是哪一種？", ["小米", "小麥", "咖啡", "蘋果"], 0],
+    ["蘭嶼達悟族用木板拼成的傳統船叫什麼？", ["拼板舟", "竹筏", "龍舟", "帆船"], 0]
+  ],
+  high: [
+    ["25 × 4 = ？", ["80", "90", "100", "125"], 2], ["80 的 3/4 是多少？", ["20", "40", "60", "75"], 2], ["0.5 等於幾分之幾？", ["1/5", "1/2", "5/1", "1/50"], 1],
+    ["3.6 + 2.45 = ？", ["5.05", "6.05", "6.5", "3.85"], 1], ["長方形長 8 公分、寬 5 公分，周長是多少？", ["13 公分", "26 公分", "40 公分", "18 公分"], 1],
+    ["正方形邊長 6 公分，面積是多少？", ["24 平方公分", "12 平方公分", "36 平方公分", "30 平方公分"], 2],
+    ["三次考試考 80、90、100 分，平均是幾分？", ["85 分", "90 分", "95 分", "270 分"], 1], ["1 公里等於幾公尺？", ["10 公尺", "100 公尺", "1000 公尺", "10000 公尺"], 2],
+    ["植物行光合作用一定需要哪一項？", ["陽光", "黑暗", "鹽巴", "塑膠"], 0], ["在一大氣壓下，水大約幾度 °C 會沸騰？", ["0 °C", "50 °C", "100 °C", "150 °C"], 2],
+    ["月亮繞著什麼轉？", ["太陽", "地球", "火星", "北極星"], 1], ["臺灣最高的山是哪一座？", ["玉山", "雪山", "大武山", "合歡山"], 0],
+    ["排灣族的「三寶」是哪三樣？", ["陶壺、琉璃珠、青銅刀", "弓、箭、矛", "竹、藤、木", "金、銀、銅"], 0],
+    ["排灣族每五年舉行一次、迎接祖靈回來的重要祭典是？", ["五年祭", "飛魚祭", "矮靈祭", "龍舟祭"], 0],
+    ["魯凱族視為純潔與榮耀象徵的花是？", ["百合花", "玫瑰花", "菊花", "蓮花"], 0],
+    ["綠島以前的舊名是什麼？", ["火燒島", "龜山島", "小琉球", "澎湖"], 0],
+    ["每年夏天，鹿野高台最有名的活動是什麼？", ["熱氣球嘉年華", "賽龍舟", "冰雕展", "賞雪"], 0],
+    ["2000 年時，臺東哪裡因為迎接「千禧曙光」而出名？", ["太麻里", "池上", "關山", "成功"], 0],
+    ["三仙台最有名的是哪一座造型像海浪的橋？", ["八拱跨海步橋", "彩虹橋", "金門大橋", "吊橋"], 0],
+    ["遙控無人機一般飛行高度不能超過多少？", ["30 公尺", "120 公尺", "500 公尺", "沒有限制"], 1]
+  ]
+};
+const RICH_CHANCE = [
+  { t: "撿起地上的垃圾做資源回收，社區頒給你環保獎！", m: 60 },
+  { t: "幫部落長輩搬柴火，長輩送你 100 元紅包。", m: 100 },
+  { t: "騎腳踏車沒戴安全帽，被老師提醒，繳 50 元。", m: -50 },
+  { t: "颱風來了！每棟房子要修繕 30 元。", repair: 30 },
+  { t: "搭上南迴小火車，回到起點，領 200 元。", go: 0 },
+  { t: "到豐年祭廣場跳舞！", go: 12 },
+  { t: "忘記關水龍頭浪費水，繳 40 元。", m: -40 },
+  { t: "學會一首部落古謠，大家為你鼓掌，再擲一次骰子！", again: true },
+  { t: "參加淨灘活動，每一隊各送你 20 元！", collect: 20 },
+  { t: "收小米太累了，到小米田休息一回合。", go: 6, rest: true },
+  { t: "順風！往前走 3 步。", step: 3 },
+  { t: "走錯路了，往後退 2 步。", step: -2 },
+  { t: "參加科展得獎，獲得 150 元獎金。", m: 150 }
+];
+const RICH_LINES = { roll: ["看我的！", "骰子快轉～", "這次一定好運！"], buy: ["這塊地我要了，嘿嘿！", "投資部落，未來會更好！"], pay: ["唉呀，付就付吧！", "你們的地蓋得真漂亮。"], win: ["哈哈，島主還是很厲害吧？", "下次再來挑戰我喔！"], lose: ["你們真的太強了！島主甘拜下風！"] };
+const MG = { on: false, hops: [], tiles: [], builds: {}, pawns: [] };
+const richState = () => store("rich") || {};
+const RICH_RULES = () => '<ul class="rich-rules">' +
+  '<li>每隊有 ' + RICH_START + ' 元，輪流擲兩顆骰子前進，經過起點領 ' + RICH_PASS + ' 元。</li>' +
+  '<li>停在<b>沒人買的地</b>：先回答一題<b>學習題</b>，答對才可以買下。</li>' +
+  '<li>停在<b>自己的地</b>：可以加蓋房子：小屋 → 石板屋 → 部落會所，過路費越來越高。</li>' +
+  '<li>停在<b>別隊的地</b>：要付過路費；同一個顏色的兩塊地都買下，空地過路費加倍。</li>' +
+  '<li>📚 學習卡答對領 100 元；🍀 機會卡有好運也有考驗；🌾 小米田休息一回合；🚂 南迴小火車直接回起點。</li>' +
+  '<li>玩完設定的回合數，<b>現金＋土地＋房子</b>總資產最多的隊伍獲勝；錢不夠付會自動賣房、賣地，賣光就破產。</li></ul>';
+
+/* ---------- 位置 ---------- */
+function richLocal(i) { const s = Math.floor(i / 6), k = i % 6, P = [[RH, RH], [-RH, RH], [-RH, -RH], [RH, -RH], [RH, RH]], a = P[s], b = P[s + 1]; return [a[0] + (b[0] - a[0]) * k / 6, a[1] + (b[1] - a[1]) * k / 6]; }
+function richWorld(i, off) { const [x, z] = richLocal(i); return new V3(RPOS.x + x + (off ? off[0] : 0), 0.24, RPOS.z + z + (off ? off[1] : 0)); }
+const RICH_ROT = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
+function richInward(i) { const [x, z] = richLocal(i); const s = Math.floor(i / 6), k = i % 6; if (k === 0) return [-Math.sign(x) * 0.7, -Math.sign(z) * 0.7]; return s === 0 ? [0, -1] : s === 1 ? [1, 0] : s === 2 ? [0, 1] : [-1, 0]; }
+/* ---------- 格子貼圖 ---------- */
+function richTileTex(i) {
+  const c = RICH_CELLS[i];
+  return canvasTex(256, 256, (x, w, h) => {
+    x.fillStyle = "#FFF9EC"; x.fillRect(0, 0, w, h);
+    if (c.k === "lot") { x.fillStyle = RICH_GCOL[c.g]; x.fillRect(0, 0, w, 62); x.fillStyle = "rgba(255,255,255,.35)"; x.fillRect(0, 54, w, 8); }
+    else { const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, c.k === "start" ? "#FFE7A8" : c.k === "chance" ? "#DDF3E2" : c.k === "learn" ? "#DCEBFF" : "#FCE6D6"); g.addColorStop(1, "#FFF9EC"); x.fillStyle = g; x.fillRect(0, 0, w, h); }
+    x.strokeStyle = "#5B4630"; x.lineWidth = 6; x.strokeRect(3, 3, w - 6, h - 6);
+    x.fillStyle = "#3A2C1E"; x.textAlign = "center"; x.textBaseline = "middle";
+    const font = s => "bold " + s + "px 'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif";
+    if (c.k === "lot") {
+      const t = c.n, two = t.length > 4, l1 = two ? t.slice(0, Math.ceil(t.length / 2)) : t, l2 = two ? t.slice(Math.ceil(t.length / 2)) : "";
+      x.font = font(two ? 44 : 50); x.fillText(l1, w / 2, two ? 112 : 128); if (l2) x.fillText(l2, w / 2, 164);
+      x.font = font(34); x.fillStyle = "#8A5A12"; x.fillText("$" + c.p, w / 2, 222);
+    } else {
+      x.font = "84px 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif"; x.fillText(c.ic, w / 2, 100);
+      x.font = font(c.n.length > 4 ? 36 : 44); x.fillStyle = "#3A2C1E"; x.fillText(c.n, w / 2, 196);
+      if (c.k === "start") { x.font = font(26); x.fillStyle = "#8A5A12"; x.fillText("領 $200", w / 2, 234); }
+    }
+  });
+}
+/* ---------- 島嶼 ---------- */
+function makeRichIsland() {
+  const root = new THREE.Group();
+  floatingIsland(RR, 2.6, root, 0, 0, { type: "richIsle" });
+  root.add(part(box(RC * 7 + 0.6, 0.12, RC * 7 + 0.6), M("#8A6A45"), 0, 0.06, 0));
+  root.add(part(box(RC * 5 - 0.2, 0.14, RC * 5 - 0.2), M("#9DC27A"), 0, 0.07, 0));
+  for (let i = 0; i < 24; i++) { const [x, z] = richLocal(i); root.add(part(box(RC * 0.96, 0.2, RC * 0.96), M("#EFE2C6"), x, 0.12, z)); }
+  // 中央：島主之家（石板屋風）、巨大骰子、金幣噴泉
+  const house = new THREE.Group(); house.position.set(-1.6, 0.14, -1.8); house.rotation.y = Math.PI / 4;
+  house.add(part(box(2.6, 1.2, 2.0), M("#8E8A83"), 0, 0.6, 0));
+  const roof = part(box(3.0, 0.14, 1.3), M("#5D5A57"), 0, 1.45, 0.48, 0.42, 0, 0), roof2 = part(box(3.0, 0.14, 1.3), M("#5D5A57"), 0, 1.45, -0.48, -0.42, 0, 0); house.add(roof); house.add(roof2);
+  house.add(part(box(0.7, 0.9, 0.06), M("#5B3A22"), 0, 0.45, 1.01)); house.add(part(box(0.18, 1.3, 0.18), M("#B5322A"), -0.75, 0.65, 1.02)); house.add(part(box(0.18, 1.3, 0.18), M("#B5322A"), 0.75, 0.65, 1.02));
+  root.add(house);
+  const fount = new THREE.Group(); fount.position.set(2.2, 0.14, 2.2);
+  fount.add(part(cyl(1.1, 1.25, 0.35, 24), M("#D9CFBF"), 0, 0.18, 0)); fount.add(part(cyl(0.95, 0.95, 0.05, 24), M("#5FB8D8"), 0, 0.33, 0));
+  fount.add(part(cyl(0.18, 0.22, 0.9, 10), M("#D9CFBF"), 0, 0.7, 0)); fount.add(part(cyl(0.5, 0.3, 0.12, 16), M("#E8B33A"), 0, 1.15, 0));
+  root.add(fount);
+  const sign = signBoard("嘉蘭富翁島", "#B5322A", 3.2); sign.position.set(1.2, 0.14, -2.6); sign.rotation.y = Math.PI / 4; root.add(sign);
+  [[0, 10.6], [-10.6, 0], [0, -10.6], [10.4, 5]].forEach(([x, z]) => { const t = tree("round", 0.7); t.position.set(x, 0.14, z); root.add(t); });
+  mergeStatic(root); root.position.copy(RPOS); scene.add(root);
+  // 動態：格子貼圖、骰子雕塑、金幣、島主、棋子、房子
+  const dyn = new THREE.Group(); dyn.position.copy(RPOS); scene.add(dyn); MG.dyn = dyn;
+  for (let i = 0; i < 24; i++) {
+    const [x, z] = richLocal(i), t = new THREE.Mesh(new THREE.PlaneGeometry(RC * 0.9, RC * 0.9), new THREE.MeshStandardMaterial({ map: richTileTex(i), roughness: 0.85 }));
+    t.rotation.set(-Math.PI / 2, 0, RICH_ROT[Math.floor(i / 6)]); t.position.set(x, 0.232, z); t.receiveShadow = true; dyn.add(t);
+    const own = new THREE.Mesh(new THREE.BoxGeometry(RC * 0.99, 0.06, RC * 0.99), new THREE.MeshStandardMaterial({ color: "#FFFFFF", roughness: 0.5 })); own.position.set(x, 0.196, z); own.visible = false; dyn.add(own);
+    MG.tiles.push({ t, own });
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(RC, 0.6, RC), new THREE.MeshBasicMaterial({ visible: false })); hit.position.set(x, 0.3, z); hit.userData = { pick: true, type: "richCell", i }; dyn.add(hit); pickables.push(hit);
+  }
+  const dice = [richDieMesh(1.15), richDieMesh(0.9)]; dice[0].position.set(0.6, 0.72, 0.3); dice[0].rotation.set(0.2, 0.7, 0.1); dice[1].position.set(-0.7, 0.6, 1.3); dice[1].rotation.set(-0.5, 0.3, 0.9); dice.forEach(d => dyn.add(d)); MG.statues = dice;
+  MG.coins = []; for (let i = 0; i < 6; i++) { const c = part(cyl(0.16, 0.16, 0.04, 16), dm("#F2C230", { metalness: 0.8, roughness: 0.25 }), 2.2, 1.4, 2.2, Math.PI / 2, 0, 0); dyn.add(c); MG.coins.push(c); }
+  const host = richHostModel(); host.position.set(-0.4, 0.14, -0.3); host.rotation.y = Math.PI / 4; dyn.add(host); MG.host = host;
+  const hh = new THREE.Mesh(new THREE.BoxGeometry(1, 2.2, 1), new THREE.MeshBasicMaterial({ visible: false })); hh.position.set(-0.4, 1.1, -0.3); hh.userData = { pick: true, type: "richHost" }; dyn.add(hh); pickables.push(hh);
+  const an = new THREE.Object3D(); an.position.set(-0.4, 2.7, -0.3); dyn.add(an);
+  addLabel(an, 0, "richhost", {}, () => richSetup("host"));
+  // 金色拱橋：一年級島 → 富翁島
+  const g1 = ANG[0] * Math.PI / 180, gp = new V3(Math.cos(g1) * D, 0, Math.sin(g1) * D), th0 = Math.atan2(-gp.x, -gp.z);
+  let best = null;
+  for (let k = 0; k < SUBJECTS.length; k++) { const th = th0 + (36 + k * 32) * Math.PI / 180, p = gp.clone().add(new V3(Math.sin(th) * RI, 0, Math.cos(th) * RI)); const dd = p.distanceTo(RPOS); if (!best || dd < best.d) best = { p, d: dd }; }
+  const dir = RPOS.clone().sub(best.p).normalize(), A = best.p.clone().addScaledVector(dir, RS - 0.3), B = RPOS.clone().addScaledVector(dir, -(RR - 0.3));
+  const br = new THREE.Group(), L = A.distanceTo(B), N = Math.round(L / 0.9), yaw = Math.atan2(dir.x, dir.z), side = new V3(dir.z, 0, -dir.x), yAt = t => Math.sin(Math.PI * t) * 6.5;
+  for (let i = 0; i < N; i++) {
+    const t0 = i / N, t1 = (i + 1) / N, p0 = A.clone().lerp(B, t0), p1 = A.clone().lerp(B, t1), y0 = yAt(t0), y1 = yAt(t1), mid = p0.clone().add(p1).multiplyScalar(0.5);
+    const seg = part(box(1.6, 0.16, L / N * 1.02), M(i % 2 ? "#E9DFC8" : "#F3EAD6"), mid.x, (y0 + y1) / 2, mid.z); seg.rotation.set(-Math.atan2(y1 - y0, L / N), yaw, 0, "YXZ"); br.add(seg);
+    [-1, 1].forEach(sg => { const o = side.clone().multiplyScalar(sg * 0.82), rl = part(box(0.08, 0.25, L / N * 1.02), M("#D9A62E"), mid.x + o.x, (y0 + y1) / 2 + 0.2, mid.z + o.z); rl.rotation.copy(seg.rotation); br.add(rl); });
+    if (i % 6 === 3 && y0 > 1.5) br.add(part(cyl(0.18, 0.24, y0 - SEA_Y, 8), M("#D8D2C4"), mid.x, (y0 + SEA_Y) / 2, mid.z));
+  }
+  mergeStatic(br); scene.add(br);
+  const lab = new THREE.Object3D(); lab.position.copy(RPOS).add(new V3(0, 6.5, -6)); scene.add(lab);
+  addLabel(lab, 0, "plain", { name: "🎲 嘉蘭富翁島" }, () => go("rich"));
+}
+function richDieMesh(s) {
+  const mats = [1, 6, 2, 5, 3, 4].map(n => new THREE.MeshStandardMaterial({ map: canvasTex(128, 128, (x, w) => {
+    x.fillStyle = "#FFFDF6"; x.fillRect(0, 0, w, w); x.fillStyle = n === 1 ? "#D8443A" : "#2A2A2A";
+    const P = { 1: [[2, 2]], 2: [[1, 1], [3, 3]], 3: [[1, 1], [2, 2], [3, 3]], 4: [[1, 1], [3, 1], [1, 3], [3, 3]], 5: [[1, 1], [3, 1], [2, 2], [1, 3], [3, 3]], 6: [[1, 1], [3, 1], [1, 2], [3, 2], [1, 3], [3, 3]] }[n];
+    P.forEach(([a, b]) => { x.beginPath(); x.arc(a * 32, b * 32, n === 1 ? 18 : 12, 0, Math.PI * 2); x.fill(); });
+  }), roughness: 0.3 }));
+  const m = new THREE.Mesh(new RoundedBoxGeo(s), mats); m.castShadow = true; return m;
+}
+function RoundedBoxGeo(s) { const g = new THREE.BoxGeometry(s, s, s, 3, 3, 3), p = g.attributes.position, v = new V3(); for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); const c = v.clone().clampScalar(-s * 0.36, s * 0.36); v.sub(c); if (v.length() > 0) v.setLength(s * 0.14); v.add(c); p.setXYZ(i, v.x, v.y, v.z); } g.computeVertexNormals(); return g; }
+function richHostModel() {
+  const g = npcFigure(3, "#7A4FC2", 2.1);
+  g.add(part(cyl(0.13, 0.13, 0.22, 16), M("#262224"), 0, 1.08, 0)); g.add(part(cyl(0.2, 0.2, 0.03, 18), M("#262224"), 0, 0.97, 0));
+  g.add(part(cyl(0.132, 0.132, 0.04, 16), M("#E8B33A"), 0, 1.0, 0));
+  g.add(part(box(0.1, 0.02, 0.02), M("#3A2A20"), 0, 0.85, 0.11));
+  g.add(part(box(0.18, 0.2, 0.02), M("#E8B33A"), 0, 0.58, 0.125));
+  return g;
+}
+function richPawn(col, host) {
+  const g = new THREE.Group(), m = dm(col, { roughness: 0.22, metalness: 0.25 });
+  const pts = [[0, 0], [0.42, 0], [0.42, 0.08], [0.3, 0.16], [0.18, 0.3], [0.14, 0.6], [0.2, 0.68], [0.14, 0.74], [0.01, 0.78]].map(p => new THREE.Vector2(p[0], p[1]));
+  g.add(part(new THREE.LatheGeometry(pts, 24), m, 0, 0, 0)); g.add(part(sph(0.22, 18, 14), m, 0, 0.92, 0));
+  g.add(part(new THREE.TorusGeometry(0.2, 0.035, 8, 24), dm("#FFFFFF"), 0, 0.68, 0, Math.PI / 2, 0, 0));
+  if (host) { g.add(part(cyl(0.12, 0.12, 0.22, 14), dm("#262224"), 0, 1.2, 0)); g.add(part(cyl(0.2, 0.2, 0.03, 16), dm("#262224"), 0, 1.1, 0)); }
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; }); g.scale.setScalar(0.95); return g;
+}
+function richHouse(lv, col) {
+  const g = new THREE.Group(), wall = M(lv >= 2 ? "#9A958C" : "#F2E6CF"), roofM = M(lv >= 2 ? "#5D5A57" : col), acc = M(col);
+  if (lv === 1) { g.add(part(box(0.7, 0.5, 0.6), wall, 0, 0.25, 0)); g.add(part(cone(0.58, 0.42, 4), roofM, 0, 0.7, 0, 0, Math.PI / 4, 0)); }
+  else if (lv === 2) { g.add(part(box(1.0, 0.55, 0.75), wall, 0, 0.28, 0)); g.add(part(box(1.15, 0.08, 0.5), roofM, 0, 0.66, 0.2, 0.45, 0, 0)); g.add(part(box(1.15, 0.08, 0.5), roofM, 0, 0.66, -0.2, -0.45, 0, 0)); g.add(part(box(0.25, 0.4, 0.04), acc, 0, 0.2, 0.39)); }
+  else { g.add(part(box(1.3, 0.85, 0.95), wall, 0, 0.43, 0)); g.add(part(box(1.5, 0.1, 0.62), roofM, 0, 0.98, 0.26, 0.5, 0, 0)); g.add(part(box(1.5, 0.1, 0.62), roofM, 0, 0.98, -0.26, -0.5, 0, 0)); g.add(part(box(0.14, 1.2, 0.14), acc, -0.45, 0.6, 0.5)); g.add(part(box(0.14, 1.2, 0.14), acc, 0.45, 0.6, 0.5)); g.add(part(box(0.35, 0.55, 0.04), M("#5B3A22"), 0, 0.28, 0.48)); }
+  const flag = new THREE.Group(); flag.position.set(lv === 1 ? 0.42 : 0.7, 0, -0.2); flag.add(part(cyl(0.02, 0.02, 1.1, 5), M("#EEE"), 0, 0.55, 0)); flag.add(part(box(0.3, 0.2, 0.02), acc, 0.15, 0.98, 0)); g.add(flag);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; }); return g;
+}
+function richPose(i) {
+  if (i == null) { const t = RPOS.clone().add(new V3(0, 0, 0.5)), p = RPOS.clone().add(new V3(isMobile() ? 14 : 12, isMobile() ? 34 : 22, isMobile() ? 30 : 20)); if (!MG.on) shiftForPanel(t, p); return { target: t, pos: p }; }
+  const w = richWorld(i), [x, z] = richLocal(i), out = new V3(x, 0, z).normalize();
+  const t = w.clone().addScaledVector(out, 1.4), p = w.clone().addScaledVector(out, isMobile() ? 12 : 9).add(new V3(0, isMobile() ? 14 : 9.5, 0)).add(new V3(-out.z, 0, out.x).multiplyScalar(2));
+  return { target: t, pos: p };
+}
+function stepRich(dt, time) {
+  if (!MG.dyn) return;
+  if (focus.g === 13 && !ui.paused) {
+    MG.coins.forEach((c, k) => { const ph = (time * 0.6 + k / 6) % 1; c.position.set(2.2 + Math.sin(k * 2.4) * ph * 0.7, 1.3 + Math.sin(ph * Math.PI) * 1.2, 2.2 + Math.cos(k * 2.4) * ph * 0.7); c.rotation.z += dt * 4; });
+    MG.statues[0].position.y = 0.72 + Math.sin(time * 1.2) * 0.05;
+  }
+  if (!MG.on) return;
+  const h = MG.hops[0];
+  if (h) {
+    h.t += dt / (reduceMotion ? 0.12 : 0.26);
+    const k = clamp(h.t, 0, 1); h.o.position.lerpVectors(h.a, h.b, k); h.o.position.y = h.a.y + Math.sin(Math.PI * k) * 0.75;
+    if (k >= 1) { MG.hops.shift(); kartBeep(520 + (MG.hops.length % 2) * 80, 0.05, 0.05); if (!MG.hops.length && h.done) h.done(); }
+  }
+  MG.pawns.forEach((p, k) => { if (p && k === MG.g.turn && !MG.hops.length) p.rotation.y += dt * 1.2; });
+}
+/* ---------- 島嶼面板 ---------- */
+function panelRich(quiet) {
+  const s = richState(), sv = store("richSave");
+  openPanel('<div class="p-top"><span class="crumb">嘉蘭樂學島．衛星島</span><button class="p-close" aria-label="關閉">×</button></div>' +
+    '<h2 style="--c:#B5322A"><i class="dot"></i>🎲 嘉蘭富翁島</h2><p class="p-lede">從一年級島走金色拱橋就能到。整座島就是一張立體富翁遊戲棋盤，24 格都是臺東的好地方！可以分組對戰，也可以挑戰島主阿金。</p>' +
+    '<div class="row dr-acts"><button class="btn" id="rcTeam">👥 組隊對戰</button><button class="btn" id="rcHost">🎩 挑戰島主</button>' + (sv ? '<button class="btn ghost" id="rcLoad">▶ 繼續上次（第 ' + sv.round + ' 回合）</button>' : "") + '</div>' +
+    '<h3>📜 遊戲規則</h3>' + RICH_RULES() +
+    '<p class="small">戶外教育建議：一台平板或投影機一起玩，每隊 3–5 人輪流擲骰、討論答案，大約 20–30 分鐘。' + (s.games ? "　已經玩了 " + s.games + " 場" + (s.beat ? "，曾經打敗島主 🏆" : "") + "。" : "") + '</p>', "subject");
+  $("#rcTeam").addEventListener("click", () => richSetup("team"));
+  $("#rcHost").addEventListener("click", () => richSetup("host"));
+  const ld = $("#rcLoad"); if (ld) ld.addEventListener("click", () => richStart(store("richSave")));
+  if (!quiet) speak("嘉蘭富翁島。");
+}
+/* ---------- 開局設定 ---------- */
+function richSetup(mode) {
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  const st = { mode, n: mode === "host" ? 1 : 2, rounds: 10, diff: "high" };
+  const render = () => {
+    const names = (store("richNames") || RICH_TEAMS.map(t => t.n));
+    openModal('<div class="npc-card rich-setup" style="--s:#B5322A"><button class="m-close" aria-label="關閉">×</button><div class="npc-head"><div class="npc-ava rich">' + (mode === "host" ? "🎩" : "👥") + '</div><div><small>嘉蘭富翁島．開局設定</small><h2>' + (mode === "host" ? "挑戰島主阿金" : "組隊對戰") + '</h2></div></div>' +
+      (mode === "host" ? '<div class="npc-bubble">嘿嘿，我是島主阿金！整座島的地我都想買下來。你們有幾隊要一起來挑戰我呀？</div>' : "") +
+      '<div class="rs-row"><span>' + (mode === "host" ? "挑戰隊數" : "隊伍數") + '</span>' + (mode === "host" ? [1, 2, 3] : [2, 3, 4]).map(n => '<button class="chip' + (st.n === n ? " on" : "") + '" data-n="' + n + '">' + n + ' 隊</button>').join("") + '</div>' +
+      '<div class="rs-teams">' + RICH_TEAMS.slice(0, st.n).map((t, i) => '<label style="--t:' + t.c + '"><span>' + t.e + '</span><input maxlength="8" data-name="' + i + '" value="' + esc(names[i] || t.n) + '" aria-label="第 ' + (i + 1) + ' 隊隊名"></label>').join("") + (mode === "host" ? '<label style="--t:' + RICH_HOST.c + '"><span>🎩</span><input value="島主阿金" disabled></label>' : "") + '</div>' +
+      '<div class="rs-row"><span>回合數</span>' + [6, 10, 14].map(n => '<button class="chip' + (st.rounds === n ? " on" : "") + '" data-r="' + n + '">' + n + ' 回合</button>').join("") + '<small>約 ' + Math.round(st.rounds * (st.n + (mode === "host" ? 1 : 0)) * 0.6) + ' 分鐘</small></div>' +
+      '<div class="rs-row"><span>學習題</span><button class="chip' + (st.diff === "low" ? " on" : "") + '" data-d="low">低年級</button><button class="chip' + (st.diff === "high" ? " on" : "") + '" data-d="high">中高年級</button></div>' +
+      '<div class="row npc-act"><button class="btn" id="rsGo">🎲 開始遊戲</button></div></div>', "npc-sheet");
+    const keep = () => { const n = store("richNames") || RICH_TEAMS.map(t => t.n); $all("[data-name]").forEach(inp => n[+inp.getAttribute("data-name")] = inp.value.trim() || RICH_TEAMS[+inp.getAttribute("data-name")].n); store("richNames", n); };
+    $all("[data-n]").forEach(b => b.addEventListener("click", () => { keep(); st.n = +b.getAttribute("data-n"); render(); }));
+    $all("[data-r]").forEach(b => b.addEventListener("click", () => { keep(); st.rounds = +b.getAttribute("data-r"); render(); }));
+    $all("[data-d]").forEach(b => b.addEventListener("click", () => { keep(); st.diff = b.getAttribute("data-d"); render(); }));
+    $("#rsGo").addEventListener("click", () => {
+      keep(); const n = store("richNames");
+      const teams = RICH_TEAMS.slice(0, st.n).map((t, i) => ({ n: n[i] || t.n, e: t.e, c: t.c, ai: false, money: RICH_START, pos: 0, out: false, skip: 0 }));
+      if (mode === "host") teams.push(Object.assign({}, RICH_HOST, { money: RICH_START, pos: 0, out: false, skip: 0 }));
+      richStart({ mode, teams, own: Array(24).fill(null), turn: 0, round: 1, rounds: st.rounds, diff: st.diff, qi: {} });
+    });
+  };
+  render();
+}
+/* ---------- 遊戲主流程 ---------- */
+function richStart(g) {
+  if (!g || MG.on) return;
+  closeModal(); stopTour(); if (DR.fly) endDroneFlight(true);
+  MG.g = g; MG.on = true; MG.busy = false; MG.hops = [];
+  if (focus.g !== 13) { focus.g = 13; focus.key = null; }
+  if (hasPanel() && !panelMin()) { MG.hadPanel = true; setPanelMin(true, false); } else MG.hadPanel = false;
+  document.body.classList.add("rich-on");
+  MG.pawns.forEach(p => p && MG.dyn.remove(p)); MG.pawns = g.teams.map((t, i) => { if (t.out) return null; const p = richPawn(t.c, t.ai); MG.dyn.add(p); p.position.copy(richSlot(t.pos, i)).sub(RPOS); return p; });
+  richRebuildAll(); richHUD(); richNextTurn(true);
+  playChime();
+}
+function richSlot(cell, ti) { const off = [[-0.48, -0.48], [0.48, -0.48], [-0.48, 0.48], [0.48, 0.48]][ti % 4]; return richWorld(cell, off); }
+function richRebuildAll() {
+  Object.values(MG.builds).forEach(b => MG.dyn.remove(b)); MG.builds = {};
+  MG.tiles.forEach(t => t.own.visible = false);
+  MG.g.own.forEach((o, i) => { if (o) richShowOwn(i); });
+}
+function richShowOwn(i) {
+  const o = MG.g.own[i], tl = MG.tiles[i]; if (MG.builds[i]) { MG.dyn.remove(MG.builds[i]); delete MG.builds[i]; }
+  if (!o) { tl.own.visible = false; return; }
+  const t = MG.g.teams[o.t]; tl.own.visible = true; tl.own.material.color.set(t.c);
+  const [x, z] = richLocal(i), [ix, iz] = richInward(i), b = o.lv ? richHouse(o.lv, t.c) : new THREE.Group();
+  if (!o.lv) { b.add(part(cyl(0.025, 0.025, 1.0, 5), M("#EEE"), 0, 0.5, 0)); b.add(part(box(0.36, 0.24, 0.02), M(t.c), 0.18, 0.88, 0)); }
+  b.position.set(x + ix * RC * 0.92, 0.14, z + iz * RC * 0.92); b.rotation.y = RICH_ROT[Math.floor(i / 6)]; MG.dyn.add(b); MG.builds[i] = b;
+}
+const richCur = () => MG.g.teams[MG.g.turn];
+function richNextTurn(first) {
+  const g = MG.g;
+  if (!first) {
+    const alive = g.teams.filter(t => !t.out);
+    if (alive.length <= 1) return richEnd();
+    let n = g.turn; do { n = (n + 1) % g.teams.length; if (n === 0) g.round++; } while (g.teams[n].out);
+    g.turn = n;
+    if (g.round > g.rounds) return richEnd();
+    store("richSave", g);
+  }
+  richHUDUpdate();
+  const t = richCur();
+  flyTo(richPose(t.pos), 1.1); focus.flyKey = "";
+  if (t.skip > 0) { t.skip--; richCard({ ic: "🌾", title: t.e + " " + t.n + "：休息一回合", html: "還在小米田幫忙收小米，這回合休息。", btns: [["好", () => richNextTurn()]], auto: 1.6 }); return; }
+  richCard(null); MG.busy = false;
+  richSay(t.ai ? pickR(RICH_LINES.roll) : "輪到 " + t.e + " " + t.n + "，請擲骰子！");
+  $("#rhRoll").disabled = !!t.ai;
+  if (t.ai) setTimeout(() => MG.on && richCur() === t && richRoll(), 1100);
+}
+function richRoll() {
+  if (MG.busy || !MG.on) return; MG.busy = true; $("#rhRoll").disabled = true;
+  const a = 1 + Math.floor(Math.random() * 6), b = 1 + Math.floor(Math.random() * 6), d1 = $("#rhD1"), d2 = $("#rhD2");
+  let n = 0; const spin = setInterval(() => { richFace(d1, 1 + Math.floor(Math.random() * 6)); richFace(d2, 1 + Math.floor(Math.random() * 6)); kartBeep(300 + Math.random() * 300, 0.03, 0.04); if (++n >= (reduceMotion ? 2 : 9)) { clearInterval(spin); richFace(d1, a); richFace(d2, b); $("#rhDice").classList.add("done"); setTimeout(() => $("#rhDice") && $("#rhDice").classList.remove("done"), 500); richSay("擲出 " + a + " + " + b + " = " + (a + b) + " 點！"); setTimeout(() => richMove(a + b), 350); } }, 80);
+}
+function richFace(el, v) { if (!el) return; el.className = "rh-die f" + v; el.innerHTML = "<i></i>".repeat(v); el.setAttribute("aria-label", v + " 點"); }
+function richMove(steps, after) {
+  const g = MG.g, t = richCur(), ti = g.turn, p = MG.pawns[ti], dir = steps < 0 ? -1 : 1;
+  let pos = t.pos, passed = false;
+  for (let s = 0; s < Math.abs(steps); s++) { const from = pos; pos = (pos + dir + 24) % 24; if (dir > 0 && pos === 0) passed = true; MG.hops.push({ o: p, a: richSlot(from, ti).sub(RPOS), b: richSlot(pos, ti).sub(RPOS), t: 0 }); }
+  t.pos = pos;
+  flyTo(richPose(pos), Math.max(0.6, Math.abs(steps) * 0.26)); focus.flyKey = "";
+  const fin = () => { if (passed) richMoney(ti, RICH_PASS, "經過起點"); after ? after() : richLand(); };
+  if (MG.hops.length) MG.hops[MG.hops.length - 1].done = fin; else fin();
+}
+function richJump(to, collect) {   // 直接移動（火車、機會卡）
+  const g = MG.g, t = richCur(), ti = g.turn, p = MG.pawns[ti];
+  MG.hops.push({ o: p, a: p.position.clone(), b: richSlot(to, ti).sub(RPOS), t: -1.2 });
+  const passed = collect || (to < t.pos && to !== 6); t.pos = to;
+  flyTo(richPose(to), 1.0); focus.flyKey = "";
+  MG.hops[MG.hops.length - 1].done = () => { if (passed) richMoney(ti, RICH_PASS, to === 0 ? "回到起點" : "經過起點"); richLand(); };
+}
+function richRent(i) {
+  const c = RICH_CELLS[i], o = MG.g.own[i], base = Math.round(c.p * 0.1);
+  if (o.lv) return base * [0, 4, 10, 18][o.lv];
+  const pair = RICH_CELLS.map((x, k) => k).filter(k => RICH_CELLS[k].g === c.g && RICH_CELLS[k].k === "lot");
+  return pair.every(k => MG.g.own[k] && MG.g.own[k].t === o.t) ? base * 2 : base;
+}
+const richCost = i => Math.round(RICH_CELLS[i].p / 2);
+function richLand() {
+  const g = MG.g, t = richCur(), ti = g.turn, i = t.pos, c = RICH_CELLS[i];
+  if (c.k === "lot") {
+    const o = g.own[i];
+    if (!o) return richQuestion("想買下「" + c.n + "」（$" + c.p + "），先回答一題！", ok => {
+      if (!ok) return richCard({ ic: "🙈", title: "這次不能買", html: "答錯了，「" + c.n + "」這回合不能買，下次再加油！", btns: [["好", () => richNextTurn()]], auto: 1.6 });
+      if (t.money < c.p) return richCard({ ic: "💸", title: "錢不夠", html: "答對了！可是你只有 $" + t.money + "，買不起「" + c.n + "」（$" + c.p + "）。", btns: [["好", () => richNextTurn()]], auto: 1.6 });
+      const buy = () => { richMoney(ti, -c.p, "買地"); g.own[i] = { t: ti, lv: 0 }; richShowOwn(i); playChime(); if (t.ai) richSay(pickR(RICH_LINES.buy)); richNextTurn(); };
+      if (t.ai) return t.money >= c.p + 120 ? richCard({ ic: "🎩", title: "島主買下了「" + c.n + "」", html: pickR(RICH_LINES.buy), btns: [["好", buy]], auto: 1.6 }) : richCard({ ic: "🎩", title: "島主決定先存錢", html: "「" + c.n + "」這次先不買。", btns: [["好", () => richNextTurn()]], auto: 1.4 });
+      richCard({ ic: "🏡", title: "答對了！要買下「" + c.n + "」嗎？", html: "價格 <b>$" + c.p + "</b>，買下後別隊停在這裡要付你過路費 <b>$" + Math.round(c.p * 0.1) + "</b> 起。<br>你現在有 $" + t.money + "。", btns: [["不買", () => richNextTurn(), "ghost"], ["買下！", buy]] });
+    });
+    if (o.t === ti) {
+      if (o.lv >= 3) return richCard({ ic: "🏛", title: "「" + c.n + "」已經是部落會所", html: "這塊地已經蓋到最高等級了！", btns: [["好", () => richNextTurn()]], auto: 1.4 });
+      const cost = richCost(i), nx = RICH_LV[o.lv + 1];
+      if (t.money < cost) return richCard({ ic: "🏡", title: "回到自己的地", html: "想蓋" + nx + "要 $" + cost + "，現在錢不夠。", btns: [["好", () => richNextTurn()]], auto: 1.4 });
+      const build = () => { richMoney(ti, -cost, "蓋" + nx); o.lv++; richShowOwn(i); playChime(); richNextTurn(); };
+      if (t.ai) return t.money > cost + 250 ? richCard({ ic: "🎩", title: "島主在「" + c.n + "」蓋了" + nx, html: "島主的地越來越值錢了…", btns: [["好", build]], auto: 1.6 }) : richNextTurn();
+      return richCard({ ic: "🔨", title: "要在「" + c.n + "」蓋" + nx + "嗎？", html: "花 <b>$" + cost + "</b>，過路費會從 $" + richRent(i) + " 變成 <b>$" + Math.round(c.p * 0.1) * [0, 4, 10, 18][o.lv + 1] + "</b>。", btns: [["先不要", () => richNextTurn(), "ghost"], ["蓋！", build]] });
+    }
+    const rent = richRent(i), owner = g.teams[o.t];
+    return richCard({ ic: "💰", title: "付過路費給 " + owner.e + " " + owner.n, html: "「" + c.n + "」（" + RICH_LV[o.lv] + "）過路費 <b>$" + rent + "</b>。", btns: [["付錢", () => { richPay(ti, o.t, rent); if (t.ai) richSay(pickR(RICH_LINES.pay)); richNextTurn(); }]], auto: t.ai ? 1.6 : 0 });
+  }
+  if (c.k === "learn") return richQuestion("📚 學習卡：答對領 $100！", ok => { if (ok) richMoney(ti, 100, "學習卡"); richNextTurn(); }, true);
+  if (c.k === "chance") return richChance();
+  if (c.k === "rest") { t.skip = 1; return richCard({ ic: "🌾", title: "小米田", html: "幫忙收小米，下一回合休息一次。", btns: [["好", () => richNextTurn()]], auto: 1.6 }); }
+  if (c.k === "fest") return richCard({ ic: "🎉", title: "豐年祭廣場", html: "大家一起唱歌跳舞、分享食物，領 $100！", btns: [["太棒了", () => { richMoney(ti, 100, "豐年祭"); richNextTurn(); }]], auto: 1.6 });
+  if (c.k === "train") return richCard({ ic: "🚂", title: "南迴小火車", html: "嗚嗚～搭上小火車回到起點！", btns: [["出發", () => richJump(0, true)]], auto: 1.4 });
+  richNextTurn();
+}
+function richQuestion(title, cb, learn) {
+  const g = MG.g, t = richCur(), bank = RICH_Q[g.diff], k = g.qi[g.diff] = ((g.qi[g.diff] == null ? Math.floor(Math.random() * bank.length) : g.qi[g.diff]) + 7) % bank.length, q = bank[k];
+  let done = false;
+  const answer = j => {
+    if (done) return; done = true; const ok = j === q[2];
+    $all(".rq-o").forEach((b, n) => { b.disabled = true; if (n === q[2]) b.classList.add("ok"); else if (n === j) b.classList.add("no"); });
+    if (ok) playChime(); else kartBeep(180, 0.2, 0.08);
+    richSay(ok ? "答對了！" : "答錯了，正確答案是「" + q[1][q[2]] + "」。");
+    setTimeout(() => cb(ok), t.ai ? 1200 : 1300);
+  };
+  richCard({ ic: learn ? "📚" : "❓", title, html: '<p class="rq-q">' + esc(q[0]) + '</p><div class="rq-opts">' + q[1].map((o, j) => '<button class="rq-o" data-j="' + j + '"' + (t.ai ? " disabled" : "") + '><b>' + "ABCD"[j] + '</b>' + esc(o) + '</button>').join("") + '</div>', btns: [] });
+  $all(".rq-o").forEach(b => b.addEventListener("click", () => answer(+b.getAttribute("data-j"))));
+  if (!t.ai) speak(q[0]);
+  else setTimeout(() => { const right = Math.random() < 0.72; answer(right ? q[2] : (q[2] + 1 + Math.floor(Math.random() * 3)) % 4); }, 1500);
+}
+function richChance() {
+  const g = MG.g, t = richCur(), ti = g.turn, c = pickR(RICH_CHANCE);
+  const go = () => {
+    if (c.m) { richMoney(ti, c.m, "機會卡"); return richNextTurn(); }
+    if (c.repair) { const n = g.own.reduce((s, o) => s + (o && o.t === ti ? o.lv : 0), 0); if (n) richMoney(ti, -n * c.repair, "修房子"); else richSay("你還沒有房子，不用修繕！"); return richNextTurn(); }
+    if (c.collect) { g.teams.forEach((o, k) => { if (k !== ti && !o.out) richPay(k, ti, c.collect); }); return richNextTurn(); }
+    if (c.again) { MG.busy = false; richCard(null); $("#rhRoll").disabled = !!t.ai; richSay("再擲一次！"); if (t.ai) setTimeout(() => MG.on && richRoll(), 900); return; }
+    if (c.go != null) { if (c.rest) { t.skip = 1; return richJump(6, false); } return richJump(c.go, c.go === 0); }
+    if (c.step) return richMove(c.step);
+  };
+  richCard({ ic: "🍀", title: "機會卡", html: '<p class="rc-chance">' + esc(c.t) + '</p>', btns: [["好", go]], auto: t.ai ? 1.8 : 0 });
+}
+/* ---------- 金錢 ---------- */
+function richMoney(ti, v, why) {
+  const t = MG.g.teams[ti]; t.money += v; richHUDUpdate();
+  const chip = $('.rh-team[data-t="' + ti + '"]'); if (chip) { const f = document.createElement("span"); f.className = "rh-float " + (v >= 0 ? "up" : "dn"); f.textContent = (v >= 0 ? "+" : "−") + Math.abs(v) + (why ? " " + why : ""); chip.appendChild(f); setTimeout(() => f.remove(), 1800); }
+  if (t.money < 0) richRaise(ti);
+}
+function richPay(from, to, v) { richMoney(from, -v, "付錢"); richMoney(to, v, "收款"); }
+function richWorth(ti) { return MG.g.own.reduce((s, o, i) => s + (o && o.t === ti ? RICH_CELLS[i].p + o.lv * richCost(i) : 0), 0); }
+function richRaise(ti) {   // 錢不夠：自動賣房、賣地（半價）
+  const g = MG.g, t = g.teams[ti], sold = [];
+  const mine = () => g.own.map((o, i) => o && o.t === ti ? i : -1).filter(i => i >= 0).sort((a, b) => RICH_CELLS[a].p - RICH_CELLS[b].p);
+  for (const i of mine().slice().reverse()) { while (t.money < 0 && g.own[i].lv > 0) { g.own[i].lv--; t.money += Math.round(richCost(i) / 2); sold.push("賣掉「" + RICH_CELLS[i].n + "」的房子"); } }
+  for (const i of mine()) { if (t.money >= 0) break; t.money += Math.round(RICH_CELLS[i].p / 2); g.own[i] = null; sold.push("賣掉「" + RICH_CELLS[i].n + "」"); }
+  mine().forEach(i => richShowOwn(i)); g.own.forEach((o, i) => { if (!o) richShowOwn(i); });
+  if (t.money < 0) { t.out = true; t.money = 0; g.own.forEach((o, i) => { if (o && o.t === ti) { g.own[i] = null; richShowOwn(i); } }); if (MG.pawns[ti]) { MG.dyn.remove(MG.pawns[ti]); MG.pawns[ti] = null; } toast("💥 " + t.e + " " + t.n + " 破產了！"); kartBeep(150, 0.4, 0.15); }
+  else if (sold.length) toast(t.e + " " + t.n + "：錢不夠，" + sold.slice(0, 3).join("、") + (sold.length > 3 ? "…" : ""));
+  richHUDUpdate();
+}
+/* ---------- 結算 ---------- */
+function richEnd() {
+  const g = MG.g, rank = g.teams.map((t, i) => ({ t, i, w: t.out ? -1 : t.money + richWorth(i) })).sort((a, b) => b.w - a.w), win = rank[0];
+  store("richSave", null);
+  const s = richState(), hostGame = g.mode === "host", beat = hostGame && !win.t.ai, firstBeat = beat && !s.beat;
+  store("rich", Object.assign(s, { games: (s.games || 0) + 1, beat: s.beat || beat, best: Math.max(s.best || 0, win.t.ai ? 0 : win.w) }));
+  playCheer(true); confetti(); updateCertCount();
+  richCard({ ic: "🏆", title: win.t.e + " " + win.t.n + " 獲勝！", html: '<ol class="rh-rank">' + rank.map((r, k) => '<li style="--t:' + r.t.c + '"><b>' + ["🥇", "🥈", "🥉", "4"][k] + '</b><span>' + r.t.e + " " + esc(r.t.n) + '</span><em>' + (r.t.out ? "破產" : "總資產 $" + r.w) + '</em></li>').join("") + '</ol>' +
+    (hostGame ? '<p class="rc-chance">' + (beat ? "🎩 " + pickR(RICH_LINES.lose) + (firstBeat ? "<br>🎁 第一次打敗島主，獲得 1 顆校寵扭蛋！" : "") : "🎩 " + pickR(RICH_LINES.win)) + '</p>' : ""), btns: [["離開", () => richExit(), "ghost"], ["再玩一場", () => { richExit(true); richSetup(g.mode); }]] });
+  speak(win.t.n + "獲勝！");
+}
+function richExit(silent) {
+  if (!MG.on) return; MG.on = false; MG.hops = [];
+  MG.pawns.forEach(p => p && MG.dyn.remove(p)); MG.pawns = []; Object.values(MG.builds).forEach(b => MG.dyn.remove(b)); MG.builds = {}; MG.tiles.forEach(t => t.own.visible = false);
+  const h = $("#richHud"); if (h) h.remove(); document.body.classList.remove("rich-on");
+  if (!silent) { if (MG.hadPanel && panelMin()) setPanelMin(false, false); focus.flyKey = ""; flyTo(richPose(), 1.2); if (focus.g === 13) panelRich(true); }
+}
+/* ---------- HUD ---------- */
+function richHUD() {
+  let h = $("#richHud"); if (h) h.remove();
+  h = document.createElement("div"); h.id = "richHud"; h.className = "rhud";
+  h.innerHTML = '<div class="rh-top"><div class="rh-round" id="rhRound"></div><div class="rh-teams" id="rhTeams"></div><button class="dh-btn" id="rhRule" title="遊戲規則">📜</button><button class="dh-btn exit" id="rhExit">✕ 暫停離開</button></div>' +
+    '<div class="rh-card" id="rhCard" hidden></div>' +
+    '<div class="rh-bot"><div class="rh-say" id="rhSay" role="status" aria-live="polite"></div><div class="rh-dice" id="rhDice"><span class="rh-die f1" id="rhD1"><i></i></span><span class="rh-die f1" id="rhD2"><i></i></span></div><button class="btn rh-roll" id="rhRoll">🎲 擲骰子</button></div>';
+  $("#app").appendChild(h);
+  $("#rhRoll").addEventListener("click", richRoll);
+  $("#rhExit").addEventListener("click", () => { store("richSave", MG.g); toast("遊戲進度已保存，下次可以按「繼續上次」接著玩。"); richExit(); });
+  $("#rhRule").addEventListener("click", () => { modalBack = "rich"; openModal('<div class="npc-card" style="--s:#B5322A"><button class="m-close" aria-label="關閉">×</button><div class="npc-head"><div class="npc-ava rich">📜</div><div><small>嘉蘭富翁島</small><h2>遊戲規則</h2></div></div>' + RICH_RULES() + '</div>', "npc-sheet"); });
+  richHUDUpdate();
+}
+function richHUDUpdate() {
+  const g = MG.g, el = $("#rhTeams"); if (!el) return;
+  $("#rhRound").innerHTML = '<small>回合</small><b>' + Math.min(g.round, g.rounds) + '</b>/' + g.rounds;
+  el.innerHTML = g.teams.map((t, i) => '<div class="rh-team' + (i === g.turn ? " on" : "") + (t.out ? " out" : "") + '" data-t="' + i + '" style="--t:' + t.c + '"><span class="rh-e">' + t.e + '</span><div><b>' + esc(t.n) + '</b><small>$' + t.money + '　🏠' + g.own.filter(o => o && o.t === i).length + (t.skip ? "　🌾休息" : "") + '</small></div></div>').join("");
+}
+function richSay(t) { const s = $("#rhSay"); if (s) s.textContent = t || ""; }
+function richCard(o) {
+  const c = $("#rhCard"); if (!c) return; clearTimeout(MG.autoT);
+  if (!o) { c.hidden = true; c.innerHTML = ""; return; }
+  const t = richCur(), ai = t && t.ai;
+  c.hidden = false; c.style.setProperty("--t", t ? t.c : "#B5322A");
+  c.innerHTML = '<div class="rc-head"><span>' + o.ic + '</span><h3>' + esc(o.title) + '</h3></div><div class="rc-body">' + o.html + '</div><div class="rc-btns">' + o.btns.map((b, k) => '<button class="btn ' + (b[2] || "") + '" data-k="' + k + '"' + (ai ? " disabled" : "") + '>' + b[0] + '</button>').join("") + '</div>';
+  let fired = false; const fire = k => { if (fired) return; fired = true; c.hidden = true; o.btns[k][1](); };
+  $all(".rc-btns button", c).forEach(b => b.addEventListener("click", () => fire(+b.getAttribute("data-k"))));
+  if (o.btns.length && ai) MG.autoT = setTimeout(() => fire(o.btns.length - 1), (o.auto || 1.6) * 1000);
+}
+
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -6031,6 +6491,7 @@ function refreshOpenState() {
     else if (focus.g === 10) panelKart(true);
     else if (focus.g === 11) panelZoo(true);
     else if (focus.g === 12) panelDrone(true);
+    else if (focus.g === 13) panelRich(true);
     else if (focus.g) panelIsland(focus.g);
     else if (focus.g === null) panelHome();
   }
@@ -6141,6 +6602,7 @@ function route() {
   const h = (location.hash || "").replace(/^#/, "") || "home";
   let m;
   if (DR.fly && h !== "drone") endDroneFlight(true);
+  if (MG.on && h !== "rich") { store("richSave", MG.g); richExit(true); }
   if (h === "teacher") { openTeacher(); return; }
   if (h === "cabinet") { openCabinet(); return; }
   if (h === "list") { openList(); return; }
@@ -6157,6 +6619,9 @@ function route() {
   if (h === "puzzle") { openPuzzle(); return; }
   if (h === "cards") { openCardBook(); return; }
   if (h === "drone" && DR.fly) return;
+  if (h === "rich" && MG.on) return;
+  if (h === "rich") { if (panelMin()) setPanelMin(false, false); focus.g = 13; focus.key = null; panelRich(); fly("rich", richPose); }
+  else
   if (h === "drone") { if (panelMin()) setPanelMin(false, false); focus.g = 12; focus.key = null; panelDrone(); fly("drone", dronePose); }
   else if (h === "zoo") { if (panelMin()) setPanelMin(false, false); focus.g = 11; focus.key = null; panelZoo(); fly("zoo", zooPose); }
   else if (h === "kart") { if (panelMin()) setPanelMin(false, false); focus.g = 10; focus.key = null; panelKart(); fly("kart", kartPose); }
