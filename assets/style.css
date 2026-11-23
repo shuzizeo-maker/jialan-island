@@ -1018,3 +1018,15 @@ body.rich-on .bar-top, body.rich-on .bar-bottom, body.rich-on #panel, body.rich-
 .rich-rules li { display: block; padding: 8px 12px 8px 30px; border-radius: 12px; background: #FBF4E6; position: relative; line-height: 1.6; font-size: .92rem; }
 .rich-rules li::before { content: "🎲"; position: absolute; left: 8px; top: 8px; font-size: .85rem; }
 @media (min-width: 900px) { .rh-card { left: auto; right: 18px; top: 96px; transform: none; width: 400px; max-height: calc(100vh - 130px); } @keyframes rhIn { from { opacity: 0; transform: translateX(20px); } } }
+
+/* ===== 文化典藏館 ===== */
+.cu-row { grid-template-columns: 34px 1fr auto; }
+.cu-no { color: #8A4A2A; font-family: "Noto Serif TC", serif; }
+.npc-ava.cu { background: linear-gradient(145deg, #3A3631, #24221F); color: #F2C88A; font-family: "Noto Serif TC", serif; font-weight: 900; font-size: 1.4rem; }
+.cu-item { display: grid; grid-template-columns: 120px 1fr; gap: 14px; align-items: start; padding: 12px; margin: 10px 0; border-radius: 14px; background: #FBF6EC; border: 1px solid #E8DCC6; }
+.cu-item:not(:has(img)) { grid-template-columns: 1fr; }
+.cu-item img { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; background: #24221F; }
+.cu-item small { color: #8A7A66; } .cu-item h3 { margin: 2px 0 6px; font-family: "Noto Serif TC", serif; font-size: 1.35rem; }
+.cu-word { display: block; font-size: .95rem; font-weight: 400; color: #6E665B; margin-top: 2px; } .cu-word b { color: #A8441F; font-family: "Noto Serif TC", serif; font-size: 1.1rem; }
+.cu-item p { margin: 0 0 8px; font-size: .95rem; line-height: 1.7; }
+@media (max-width: 520px) { .cu-item { grid-template-columns: 1fr; } .cu-item img { width: 100%; height: 160px; } }

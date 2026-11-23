@@ -1924,6 +1924,7 @@ function labelMode(L) {
   if (L.kind === "animal") return focus.g === 11 ? "fixed" : "hide";
   if (L.kind === "drone") return focus.g === 12 ? "fixed" : "hide";
   if (L.kind === "richhost") return focus.g === 13 ? "fixed" : "hide";
+  if (L.kind === "chall") return focus.g === 14 ? "fixed" : "hide";
   if (L.kind === "park") return focus.g === 9 && !PARK.ride && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "ferry") return (focus.g === 9 || focus.g === 7 || focus.g === null) && !PARK.boarded ? "fixed" : "hide";
   if (L.kind === "station") return focus.g === 8 && !RIDE.on ? "fixed" : "hide";
@@ -1955,6 +1956,8 @@ function renderLabel(L, mode) {
     if (s) L.el.style.setProperty("--s", s.color);
     L.el.setAttribute("aria-label", host ? "島主" + d.name + "，點我問問題" : d.name + "，" + GRADES[d.g - 1].name + s.name + "助教");
     L.el.innerHTML = host ? '<i>主</i><span>島主．' + esc(d.name) + '</span>' : '<i>' + esc(s.name[0]) + '</i><span>' + esc(d.name) + '</span>';
+  } else if (L.kind === "chall") {
+    L.el.className = "lbl npc station"; L.el.style.setProperty("--s", "#8A4A2A"); L.el.innerHTML = '<i>' + esc(d.h.no) + '</i><span>' + esc(d.h.name) + '</span>';
   } else if (L.kind === "richhost") {
     L.el.className = "lbl npc host"; L.el.style.setProperty("--s", "#7A4FC2"); L.el.innerHTML = '<i>🎩</i><span>島主阿金．挑戰我！</span>';
   } else if (L.kind === "drone") {
@@ -1994,7 +1997,7 @@ function updateLabels() {
   if (FW.active || PARK.ride || PARK.boarded || DR.fly || MG.on) { labels.forEach(L => { L.el.style.visibility = "hidden"; L.mode = null; }); return; }   // 放煙火時把標籤都收起來
   labels.forEach(L => {
     const m = labelMode(L); if (m !== L.mode) renderLabel(L, m);
-    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry", "animal", "drone", "richhost"].includes(L.kind)) && L.mode !== "hide";
+    let show = (ui.names || ["bld", "npc", "fest", "tool", "station", "train", "park", "ferry", "animal", "drone", "richhost", "chall"].includes(L.kind)) && L.mode !== "hide";
     if (L.kind === "grade" && L.data.g && focus.g === L.data.g && focus.key) show = false;
     if (!show) { L.el.style.visibility = "hidden"; return; }
     L.obj.getWorldPosition(_v); _v.y += L.offY; _v.project(camera);
@@ -2028,7 +2031,7 @@ function pickAt(cx, cy) {
   ray.setFromCamera(ptr, camera);
   const hits = ray.intersectObjects(pickables, false);
   if (!hits.length) return null;
-  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "animal", "drone", "richHost", "richCell", "bird", "mascot", "building"];
+  const pri = ["npc", "host", "tool", "train", "ride", "ferry", "animal", "drone", "richHost", "richCell", "cultureHall", "cultureMillet", "bird", "mascot", "building"];
   for (const t of pri) { const h = hits.find(x => x.object.userData.type === t); if (h) return h.object.userData; }
   return hits[0].object.userData;
 }
@@ -2048,6 +2051,9 @@ function onPick(u) {
   if (u.type === "drone") return openDrone(u.id);
   if (u.type === "droneIsle") return go("drone");
   if (u.type === "richIsle") return MG.on ? null : go("rich");
+  if (u.type === "cultureIsle") return go("culture");
+  if (u.type === "cultureHall") return openCultureHall(u.id);
+  if (u.type === "cultureMillet") return openCultureHall("crop");
   if (u.type === "richHost") return MG.on ? null : richSetup("host");
   if (u.type === "richCell") { const c = RICH_CELLS[u.i], o = MG.on && MG.g.own[u.i]; return toast(c.n + (c.p ? "：地價 $" + c.p + (o ? "，屬於 " + MG.g.teams[o.t].e + MG.g.teams[o.t].n + "（" + RICH_LV[o.lv] + "，過路費 $" + richRent(u.i) + "）" : "") : c.d ? "：" + c.d : "")); }
   if (u.type === "bird") return foundBird(u.id);
@@ -2091,7 +2097,7 @@ function initWorld() {
   sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05; sunLight.shadow.radius = 4; scene.add(sunLight); scene.add(sunLight.target);
   makeWater(); makeSky(); skyCloudGroup = makeSkyClouds(); makeHub(); GRADES.forEach(makeGradeIsland);
   makeHubBridges(); makeRingBridges();
-  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine(); makeZoo(); makeDroneIsland(); makeRichIsland();
+  makeLand(); makeRailway(); makeLife(); makeAmbient(); makeBirds(); makeLabels(); makeNPCs(); makeHarbor(); loadTools(); makeTrainLine(); initMeteors(); initFireworks(); makePark(); makeKartIsland(); makeGachaMachine(); makeZoo(); makeDroneIsland(); makeRichIsland(); makeCultureIsland();
   applyTime();
   canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; stopTour(); hideHero(); });
   canvas.addEventListener("pointerup", e => {
@@ -2105,7 +2111,7 @@ function initWorld() {
   renderer.setAnimationLoop(() => {
     if (KG.on) { last = performance.now(); return; }   // 玩卡丁車時暫停 3D 畫面，省電又順暢
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now; time += ui.paused ? 0 : dt;
-    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded && !DR.fly) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt); stepZoo(dt, time); stepDroneIsland(dt, time); stepRich(dt, time);
+    stepTween(dt); if (FW.active && !RIDE.on) camera.lookAt(controls.target); else if (!RIDE.on && !PARK.ride && !PARK.boarded && !DR.fly) controls.update(); stepTrain(); stepRide(); stepFerry(dt); stepPark(dt); stepParkRide(dt); stepKartIsland(dt); stepZoo(dt, time); stepDroneIsland(dt, time); stepRich(dt, time); stepCulture(dt);
     scene.children.forEach(o => { if (o.userData.follow) o.position.copy(camera.position); });
     if (sunMesh.userData.dir) sunMesh.position.copy(camera.position).addScaledVector(sunMesh.userData.dir, 600);
     if (moonSprite.userData.dir) moonSprite.position.copy(camera.position).addScaledVector(moonSprite.userData.dir, 580);
@@ -3125,6 +3131,7 @@ const HOST_FAQ = [
   { q: "今晚有流星雨嗎？", k: ["流星", "星星", "天文", "許願"], a: "", act: ["", "meteor"] },
   { q: "小火車怎麼搭？", k: ["火車", "小火車", "搭車", "車站", "坐車"], a: "環島小火車每天 06:00 到 22:00 繞著群島跑，停靠 8 個車站。點畫面上的「🚃 環島小火車」可以看即時動態，還能直接上車搭一圈！", act: ["看小火車即時動態", "train"] },
   { q: "怎麼放煙火？", k: ["煙火", "放煙火", "花火"], a: "每拿到一張學習證書，就能得到一次放煙火的機會。打開左下角的 🎒 背包，點「放煙火」，選一種世界知名的煙火秀風格，白天晚上都能放！", act: ["我要放煙火", "fireworks"] },
+  { q: "文化典藏館在哪裡？", k: ["典藏", "文化", "博物館", "石板屋", "小米", "排灣", "魯凱", "族語", "耆老", "山林記憶"], a: "文化典藏館「嘉蘭・山林記憶」就在嘉蘭國小旁邊，從學校走石橋就能到，搭小火車在「文化典藏館站」下車也可以。八棟石板屋是八個主題展館，第一件館藏是小米，有族語名稱、由來和文獻出處。家裡有老物件、長輩的故事，也可以告訴老師，一起變成館藏喔！", act: ["去文化典藏館", "culture"] },
   { q: "富翁島在哪裡？", k: ["大富翁", "富翁", "骰子", "買地", "島主阿金", "阿金", "對戰", "桌遊"], a: "嘉蘭富翁島在一年級島的外海，走金色拱橋就能到！整座島就是一張立體富翁遊戲棋盤，24 格都是臺東的好地方。可以 2–4 隊組隊對戰，也可以挑戰島主阿金。停在空地要先答對學習題才能買地喔！第一次打敗島主，還送 1 顆校寵扭蛋。", act: ["去富翁島", "rich"] },
   { q: "無人機島在哪裡？", k: ["無人機", "空拍", "飛機", "空拍機", "飛行", "執照", "燈光秀", "程式飛行"], a: "無人機島在二年級島的外海，走藍色步道橋就能到。機庫裡有八款無人機：空拍機、穿越機、植保機、物流機、垂直起降固定翼，還有軍用的長航時偵察機和隱形飛翼機。可以坐上駕駛座試飛、挑戰光環、寫程式讓無人機飛正方形；考過法規小教室又完成光環挑戰，就能拿到飛行員證和 1 顆校寵扭蛋！晚上還有無人機燈光秀喔。", act: ["去無人機島", "drone"] },
   { q: "動物島在哪裡？", k: ["動物", "動物島", "動物園", "貓熊", "企鵝", "長頸鹿", "袋鼠", "護照", "保育"], a: "世界動物島在四年級島的外海，走步道橋就能到。島上分成極地、溫帶與高山森林、熱帶雨林、熱帶草原、沙漠與澳洲五個氣候區，有 14 種動物。點每一隻動物認識牠，就能蓋動物護照章，集滿送 2 顆校寵扭蛋！", act: ["去動物島", "zoo"] },
@@ -3659,7 +3666,7 @@ function stepMeteors(dt) {
 /* ===================== 環島小火車：仿 YouBike 即時看板，依真實時間行駛（06:00–22:00） ===================== */
 const TR = { R: 18, Y: 3.0, V: 1.5, DWELL: 12, OPEN: 6 * 3600, CLOSE: 22 * 3600, st: [], seg: [], T: 0, hub: 0, cars: [], group: null, labels: [], label: null };
 function trainStations() {
-  const list = [{ key: "hub", name: "嘉蘭國小站", ang: 120, color: "#3E6B64", go: "hub" }, { key: "tools", name: "工具港站", ang: 60, color: "#17607A", go: "tools" }];
+  const list = [{ key: "hub", name: "嘉蘭國小站", ang: 120, color: "#3E6B64", go: "hub" }, { key: "tools", name: "工具港站", ang: 60, color: "#17607A", go: "tools" }, { key: "culture", name: "文化典藏館站", ang: 180, color: "#8A4A2A", go: "culture" }];
   GRADES.forEach(g => list.push({ key: "g" + g.n, name: g.name + "站", ang: ANG[g.n - 1], color: g.color, go: "g" + g.n }));
   return list.sort((a, b) => a.ang - b.ang);
 }
@@ -5606,7 +5613,7 @@ function pickDroneFor(mission) {
 let DGROUND = null;
 function groundCircles() {
   if (DGROUND) return DGROUND;
-  const c = [[0, 0, R_HUB], [DPOS.x, DPOS.z, DRR], [RPOS.x, RPOS.z, RR], [84, -24, 13.5], [-84, 6, 11], [80, 34, 12]];
+  const c = [[0, 0, R_HUB], [DPOS.x, DPOS.z, DRR], [RPOS.x, RPOS.z, RR], [CPOS.x, CPOS.z, CR], [84, -24, 13.5], [-84, 6, 11], [80, 34, 12]];
   ANG.forEach(a => { const r = a * Math.PI / 180, gp = new V3(Math.cos(r) * D, 0, Math.sin(r) * D), th0 = Math.atan2(-gp.x, -gp.z); c.push([gp.x, gp.z, RM + 0.6]);
     for (let k = 0; k < SUBJECTS.length; k++) { const th = th0 + (36 + k * 32) * Math.PI / 180; c.push([gp.x + Math.sin(th) * RI, gp.z + Math.cos(th) * RI, RS]); } });
   return (DGROUND = c);
@@ -6431,6 +6438,129 @@ function richCard(o) {
   if (o.btns.length && ai) MG.autoT = setTimeout(() => fire(o.btns.length - 1), (o.auto || 1.6) * 1000);
 }
 
+/* =====================================================================
+   🏛 嘉蘭・山林記憶 文化典藏島（嘉蘭國小旁）
+   島上八棟石板屋 = 典藏館八大展館；內容直接讀典藏館網站的 data/collection.js，
+   老師只要維護典藏館一份資料，樂學島會自動同步。
+   ===================================================================== */
+const CULTURE_URL = (CFG.cultureUrl || "https://digital-cultural-repository.pages.dev/").replace(/\/?$/, "/");
+const CPOS = new V3(-20.8, 0, 0), CR = 4.9;
+const CULTURE_HALLS = [   // 網站資料載入前的備用清單（與典藏館的八大展館一致）
+  { id: "crop", no: "01", name: "農耕與傳統作物", desc: "小米、芋頭、傳統農具，以及耕作與保存的知識。" },
+  { id: "craft", no: "02", name: "傳統服飾與工藝", desc: "衣飾、刺繡、編織、器物與圖紋的文化脈絡。" },
+  { id: "rite", no: "03", name: "歲時祭儀與生命禮俗", desc: "祭儀脈絡、生命禮俗，以及公開展示的文化界線。" },
+  { id: "society", no: "04", name: "社會制度與傳統建築", desc: "家族、傳統領袖、土地關係與家屋形制。" },
+  { id: "lang", no: "05", name: "族語與口傳文學", desc: "語別、詞彙、故事、口述與授權音檔。" },
+  { id: "history", no: "06", name: "嘉蘭歷史與遷徙", desc: "部落形成、遷徙、地方記憶與地景變遷。" },
+  { id: "eco", no: "07", name: "山林與生態知識", desc: "植物、動物、季節觀察與傳統生態智慧。" },
+  { id: "school", no: "08", name: "校園與當代傳承", desc: "學校教學成果、文化活動與跨世代共學紀錄。" }
+];
+const CU = { data: null, loading: null, sculpt: null, glows: [] };
+function cultureData() {   // 讀典藏館網站的館藏資料（跨網域用 <script> 載入）
+  if (CU.data) return Promise.resolve(CU.data);
+  if (CU.loading) return CU.loading;
+  CU.loading = new Promise(res => {
+    const prev = window.DCR, s = document.createElement("script"); let done = false;
+    const fin = ok => { if (done) return; done = true; const d = ok && window.DCR && window.DCR !== prev ? window.DCR : null; CU.data = d && d.halls ? d : { halls: CULTURE_HALLS, items: [], refs: {}, offline: true }; res(CU.data); };
+    s.src = CULTURE_URL + "data/collection.js?v=" + todayKey(); s.async = true;
+    s.onload = () => fin(true); s.onerror = () => fin(false); setTimeout(() => fin(false), 6000);
+    document.head.appendChild(s);
+  });
+  return CU.loading;
+}
+function cultureHallAt(k) { const a = (k / 8) * Math.PI * 2 + Math.PI / 8; return [Math.cos(a) * 3.35, Math.sin(a) * 3.35, a]; }
+function slateHouse(col) {
+  const g = new THREE.Group(), stone = M("#8C877F"), stone2 = M("#77726B"), slate = M("#4F4C48"), wood = M("#6B4A2E");
+  g.add(part(box(1.5, 0.62, 1.05), stone, 0, 0.31, 0));
+  for (let i = 0; i < 3; i++) g.add(part(box(1.52, 0.03, 1.07), stone2, 0, 0.12 + i * 0.18, 0));
+  g.add(part(box(1.72, 0.07, 0.72), slate, 0, 0.78, 0.25, 0.34, 0, 0)); g.add(part(box(1.72, 0.07, 0.72), slate, 0, 0.78, -0.25, -0.34, 0, 0));
+  g.add(part(box(0.36, 0.48, 0.04), wood, 0, 0.24, 0.53));
+  g.add(part(box(0.1, 0.62, 0.1), wood, -0.42, 0.31, 0.55)); g.add(part(box(0.1, 0.62, 0.1), wood, 0.42, 0.31, 0.55));
+  g.add(part(box(1.0, 0.06, 0.03), M(col), 0, 0.6, 0.56));
+  g.add(part(box(0.8, 0.12, 0.5), M("#9A948B"), 0, 0.06, 0.82));
+  return g;
+}
+function makeCultureIsland() {
+  const root = new THREE.Group();
+  floatingIsland(CR, 2.2, root, 0, 0, { type: "cultureIsle" });
+  root.add(part(cyl(1.75, 1.75, 0.08, 40), M("#6E6A64"), 0, 0.04, 0));
+  root.add(part(new THREE.TorusGeometry(1.75, 0.07, 6, 48), M("#B5823A"), 0, 0.08, 0, Math.PI / 2, 0, 0));
+  for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2; root.add(part(box(0.34, 0.03, 0.34), M(i % 2 ? "#C4532B" : "#D9A23A"), Math.cos(a) * 1.45, 0.09, Math.sin(a) * 1.45, 0, a + Math.PI / 4, 0)); }
+  root.add(part(cyl(0.55, 0.7, 0.55, 12), M("#77726B"), 0, 0.3, 0));
+  CULTURE_HALLS.forEach((h, k) => {
+    const [x, z, a] = cultureHallAt(k), house = slateHouse(["#8B5A3C", "#C4532B", "#D9A23A", "#5D6B4A", "#2E6F8E", "#7A4F9A", "#2E9E5B", "#B5322A"][k]);
+    house.position.set(x, 0, z); house.rotation.y = Math.atan2(-x, -z); root.add(house);
+  });
+  [-0.95, 0.95].forEach(dx => { const tp = totemPillar(1.1, 0.2); tp.position.set(CR - 0.5, 0, dx * 0.9); scene.add(tp); tp.position.add(CPOS); });
+  mergeStatic(root); root.position.copy(CPOS); scene.add(root);
+  // 中央：放射狀小米穗束雕塑
+  const sc = new THREE.Group(); sc.position.set(CPOS.x, 0.6, CPOS.z); scene.add(sc); CU.sculpt = sc;
+  const cols = ["#C4532B", "#D86A2E", "#E08A2E", "#E0A63A", "#D9B24A", "#C9A060", "#B8743A"], spike = new THREE.CapsuleGeometry(0.07, 0.62, 3, 6);
+  for (let i = 0; i < 34; i++) {
+    const a = i / 34 * Math.PI * 2, tilt = 0.55 + (i % 3) * 0.18, m = new THREE.Mesh(spike, M(cols[i % cols.length]));
+    const piv = new THREE.Group(); piv.rotation.set(0, a, 0); const arm = new THREE.Group(); arm.rotation.z = -tilt; piv.add(arm);
+    m.position.set(0, 0.5, 0); arm.add(m); sc.add(piv);
+  }
+  sc.add(part(cyl(0.16, 0.18, 0.55, 10), M("#D9C28A"), 0, 0.25, 0)); sc.add(part(cyl(0.19, 0.19, 0.12, 12), M("#B58A4A"), 0, 0.22, 0));
+  const gl = glow("#FFC46A", 3.2); gl.position.set(0, 0.6, 0); gl.material.opacity = 0; sc.add(gl); CU.glow = gl;
+  // 互動：展館與島
+  CULTURE_HALLS.forEach((h, k) => {
+    const [x, z] = cultureHallAt(k);
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.3, 1.5), new THREE.MeshBasicMaterial({ visible: false }));
+    hit.position.set(CPOS.x + x, 0.6, CPOS.z + z); hit.userData = { pick: true, type: "cultureHall", id: h.id }; scene.add(hit); pickables.push(hit);
+    const an = new THREE.Object3D(); an.position.set(CPOS.x + x, 1.45, CPOS.z + z); scene.add(an);
+    addLabel(an, 0, "chall", { h }, () => openCultureHall(h.id));
+  });
+  const sh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2, 12), new THREE.MeshBasicMaterial({ visible: false })); sh.position.set(CPOS.x, 1, CPOS.z); sh.userData = { pick: true, type: "cultureMillet" }; scene.add(sh); pickables.push(sh);
+  // 石橋：嘉蘭國小 → 典藏島
+  const dir = CPOS.clone().normalize(), A = dir.clone().multiplyScalar(R_HUB - 0.3), B = dir.clone().multiplyScalar(CPOS.length() - CR + 0.3), br = new THREE.Group(), L = A.distanceTo(B), yaw = Math.atan2(dir.x, dir.z), side = new V3(dir.z, 0, -dir.x);
+  const mid = A.clone().add(B).multiplyScalar(0.5);
+  const deck = part(box(1.7, 0.16, L + 0.6), M("#8C877F"), mid.x, 0.06, mid.z); deck.rotation.y = yaw; br.add(deck);
+  [-1, 1].forEach(sg => { const o = side.clone().multiplyScalar(sg * 0.85), w = part(box(0.14, 0.32, L + 0.6), M("#6E6A64"), mid.x + o.x, 0.26, mid.z + o.z); w.rotation.y = yaw; br.add(w); });
+  mergeStatic(br); scene.add(br);
+  const lab = new THREE.Object3D(); lab.position.copy(CPOS).add(new V3(-1.5, 4.2, 0)); scene.add(lab);
+  addLabel(lab, 0, "plain", { name: "🏛 文化典藏館" }, () => go("culture"));
+}
+function stepCulture(dt) {
+  if (!CU.sculpt || reduceMotion) return;
+  CU.sculpt.rotation.y += dt * 0.12;
+  CU.glow.material.opacity = Math.max(0, (S.dark - 0.4) * 1.2);
+}
+function culturePose() { const t = CPOS.clone().add(new V3(0, 0.6, 0)), p = CPOS.clone().add(new V3(-9, isMobile() ? 15 : 10, isMobile() ? 14 : 10)); shiftForPanel(t, p); return { target: t, pos: p }; }
+function panelCulture(quiet) {
+  const render = d => {
+    if (focus.g !== 14) return;
+    const n = id => d.items.filter(i => i.hall === id).length;
+    openPanel('<div class="p-top"><span class="crumb">嘉蘭國小旁．文化典藏館</span><button class="p-close" aria-label="關閉">×</button></div>' +
+      '<h2 style="--c:#8A4A2A"><i class="dot"></i>🏛 嘉蘭・山林記憶</h2><p class="p-lede">嘉蘭國小東排灣族與魯凱族文化數位典藏館。八棟石板屋就是八個主題展館，點一棟走進去，看看裡面收藏了什麼。</p>' +
+      '<div class="row dr-acts"><a class="btn" href="' + CULTURE_URL + '" target="_blank" rel="noopener">進入典藏館網站 ↗</a></div>' +
+      '<div class="tr-rows cu-halls">' + d.halls.map(h => '<button class="tr-row cu-row" data-hall="' + esc(h.id) + '"><b class="cu-no">' + esc(h.no) + '</b><b>' + esc(h.name) + '</b><small>' + (n(h.id) ? n(h.id) + " 件館藏" : "徵集中") + '</small></button>').join("") + '</div>' +
+      '<p class="small">每件館藏都有族語名稱、由來與文獻出處，內容會和學校同仁、母語老師、部落耆老一起考證補齊。' + (d.offline ? "（目前讀不到典藏館網站的館藏資料，先顯示展館目錄。）" : "") + '</p>', "subject");
+    $all("[data-hall]").forEach(b => b.addEventListener("click", () => openCultureHall(b.getAttribute("data-hall"))));
+  };
+  render(CU.data || { halls: CULTURE_HALLS, items: [], offline: false });
+  if (!CU.data) cultureData().then(render);
+  if (!quiet) speak("文化典藏館，嘉蘭・山林記憶。");
+}
+function openCultureHall(id) {
+  modalBack = (location.hash || "#home").replace(/^#/, "");
+  const show = d => {
+    const h = d.halls.find(x => x.id === id) || CULTURE_HALLS.find(x => x.id === id); if (!h) return;
+    const items = d.items.filter(i => i.hall === id);
+    const card = it => { const nm = (it.names || []).filter(n => n.word); const img = it.media && it.media.images && it.media.images[0];
+      return '<article class="cu-item">' + (img ? '<img src="' + esc(CULTURE_URL + img.src) + '" alt="' + esc(img.cap || it.title) + '" onerror="this.remove()">' : "") +
+        '<div><small>' + esc(it.id) + '</small><h3>' + esc(it.title) + (nm.length ? '<span class="cu-word">' + nm.map(n => esc(n.lang) + ' <b>' + esc(n.word) + '</b>').join("　") + '</span>' : "") + '</h3>' +
+        '<p>' + esc(it.summary || "") + '</p><a class="btn sm" href="' + CULTURE_URL + '#' + encodeURIComponent(it.id) + '" target="_blank" rel="noopener">在典藏館看完整解說 ↗</a></div></article>'; };
+    openModal('<div class="npc-card cu-card" style="--s:#8A4A2A"><button class="m-close" aria-label="關閉">×</button><div class="npc-head"><div class="npc-ava cu">' + esc(h.no) + '</div><div><small>嘉蘭・山林記憶．展館 ' + esc(h.no) + '</small><h2>' + esc(h.name) + '</h2></div></div>' +
+      '<p class="npc-why">' + esc(h.desc) + '</p>' +
+      (items.length ? items.map(card).join("") : '<div class="npc-bubble">這個展館正在徵集館藏。' + (h.seek ? '可以一起找找看：<ul class="goal-list">' + h.seek.map(s => '<li>' + esc(s) + '</li>').join("") + '</ul>' : "") + '有家裡的老物件、長輩的故事想分享，請告訴老師！</div>') +
+      '<div class="row npc-act"><a class="btn ghost" href="' + CULTURE_URL + '#halls" target="_blank" rel="noopener">典藏館展館目錄 ↗</a></div></div>', "npc-sheet");
+    speak(h.name + "。" + (items.length ? "這裡有" + items.length + "件館藏。" : "這個展館正在徵集館藏。"));
+  };
+  show(CU.data || { halls: CULTURE_HALLS, items: [] });
+  if (!CU.data) cultureData().then(d => { if (!$("#modal").hidden && $(".cu-card")) show(d); });
+}
+
 function openList() {
   modalBack = "home";
   openModal('<div class="m-head"><h1>學習島清單</h1><button class="m-close" aria-label="關閉">×</button></div><p class="p-lede">不想轉動地圖的時候，可以直接從這裡進入。</p><div class="row" style="margin-bottom:12px"><button class="btn ghost" data-go="certs">🎓 我的證書</button></div>' +
@@ -6492,6 +6622,7 @@ function refreshOpenState() {
     else if (focus.g === 11) panelZoo(true);
     else if (focus.g === 12) panelDrone(true);
     else if (focus.g === 13) panelRich(true);
+    else if (focus.g === 14) panelCulture(true);
     else if (focus.g) panelIsland(focus.g);
     else if (focus.g === null) panelHome();
   }
@@ -6620,6 +6751,8 @@ function route() {
   if (h === "cards") { openCardBook(); return; }
   if (h === "drone" && DR.fly) return;
   if (h === "rich" && MG.on) return;
+  if (h === "culture") { if (panelMin()) setPanelMin(false, false); focus.g = 14; focus.key = null; panelCulture(); fly("culture", culturePose); }
+  else
   if (h === "rich") { if (panelMin()) setPanelMin(false, false); focus.g = 13; focus.key = null; panelRich(); fly("rich", richPose); }
   else
   if (h === "drone") { if (panelMin()) setPanelMin(false, false); focus.g = 12; focus.key = null; panelDrone(); fly("drone", dronePose); }
